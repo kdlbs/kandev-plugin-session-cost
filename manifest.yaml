@@ -1,0 +1,54 @@
+id: "kandev-session-cost"
+api_version: 1
+version: "0.1.0"
+display_name: "Session Cost"
+description: "Adds a cost icon to the chat bar showing the current session's spend, cost-per-turn, and per-model breakdown on hover — resolved from the agent transcript by the tokscale CLI."
+author: "kandev"
+categories: ["analytics"]
+
+runtime:
+  type: binary
+  executables:
+    linux-amd64: "server/plugin-linux-amd64"
+    linux-arm64: "server/plugin-linux-arm64"
+    darwin-amd64: "server/plugin-darwin-amd64"
+    darwin-arm64: "server/plugin-darwin-arm64"
+    windows-amd64: "server/plugin-windows-amd64.exe"
+
+# Read-only access to kandev sessions so the backend can map the composer's
+# kandev session id to its agent/ACP transcript id (Host data API). The UI
+# only ever sends kandev ids; the transcript join happens server-side.
+capabilities:
+  api_read: ["sessions"]
+
+webhooks:
+  - key: "session-cost"
+    description: "Cost of the active chat session as JSON (GET; ?task_id=&active=)"
+    method: "GET"
+
+ui:
+  bundle: "/ui/bundle.js"
+
+# Operator settings (Settings > Plugins > Session Cost). Read through the Host
+# GetConfig RPC on every webhook call; kandev restarts the plugin whenever the
+# operator saves, so changes take effect immediately.
+config_schema:
+  type: object
+  properties:
+    command:
+      type: string
+      title: "tokscale command"
+      description: >-
+        Command to run the tokscale CLI, e.g. "/usr/local/bin/tokscale" or
+        "npx -y tokscale@4.5.3". Empty = auto-detect ("tokscale" on PATH,
+        otherwise a pinned npx fallback).
+    warn_threshold:
+      type: number
+      title: "Warn threshold (USD)"
+      description: "Session cost at or above this turns the amount amber. Default 1."
+      default: 1
+    high_threshold:
+      type: number
+      title: "High threshold (USD)"
+      description: "Session cost at or above this turns the amount red. Default 10."
+      default: 10
