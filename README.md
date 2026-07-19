@@ -9,6 +9,22 @@ The amount is colour-coded by how much you've spent (green → amber → red), a
 after the first hover the cost stays pinned next to the icon so the bar always
 "says the cost".
 
+## Screenshots
+
+The current session's spend on hover — colour-coded total, cost-per-turn, token
+totals, and a per-model breakdown:
+
+![Session cost popover](https://raw.githubusercontent.com/kdlbs/kandev-plugin-session-cost/f4c484a3f3f5d84e80baa8950732c98c76ed954a/session-cost-popover.png)
+
+The cost pill lives in the chat composer toolbar, beside the model picker:
+
+![Cost pill in the chat bar](https://raw.githubusercontent.com/kdlbs/kandev-plugin-session-cost/f4c484a3f3f5d84e80baa8950732c98c76ed954a/session-cost-toolbar.png)
+
+Operator settings (**Settings → Plugins → Session Cost**), generated from the
+manifest's `config_schema`:
+
+![Settings page](https://raw.githubusercontent.com/kdlbs/kandev-plugin-session-cost/f4c484a3f3f5d84e80baa8950732c98c76ed954a/session-cost-settings.png)
+
 ## What it does
 
 - A coins button in the chat composer toolbar (`chat-input-actions` slot,
