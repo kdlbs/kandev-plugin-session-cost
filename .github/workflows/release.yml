@@ -1,0 +1,63 @@
+name: release
+
+# Cut a GitHub Release on every v* tag. The release assets — the 5-platform
+# package tarball and its checksums.txt — are what the kandev marketplace
+# resolves and what `POST /api/plugins/install` downloads and verifies. The
+# marketplace never builds the plugin; this workflow is the build.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Plugin repo and the kandev monorepo checkout side by side, because
+      # go.mod pins `replace github.com/kandev/kandev => ../kandev/apps/backend`.
+      # A fresh Actions runner has no sibling checkout, so we make one here.
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Checkout kandev SDK (../kandev)
+        uses: actions/checkout@v4
+        with:
+          repository: kdlbs/kandev
+          path: kandev
+          # Only apps/backend is needed (the pluginsdk module + plugin-pack);
+          # sparse-checkout keeps the big monorepo clone light.
+          sparse-checkout: apps/backend
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: plugin/go.mod
+          cache-dependency-path: plugin/go.sum
+
+      - name: Verify (fmt, vet, test)
+        working-directory: plugin
+        run: |
+          test -z "$(gofmt -l ./server)" || { echo "gofmt needed:"; gofmt -l ./server; exit 1; }
+          go vet ./server/...
+          go test ./server/...
+
+      - name: Package (all platforms)
+        working-directory: plugin
+        run: make package
+
+      - name: Extract checksums.txt release asset
+        working-directory: plugin
+        run: tar -xzf kandev-session-cost-*.tar.gz checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            plugin/kandev-session-cost-*.tar.gz
+            plugin/checksums.txt
+          generate_release_notes: true
