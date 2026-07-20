@@ -1,7 +1,7 @@
 .PHONY: build test fmt vet package package-host clean
 
 BIN := bin/kandev-session-cost
-VERSION := 0.1.0
+VERSION := 0.1.1
 STAGE := .build/stage
 PKG_OUT := kandev-session-cost-$(VERSION).tar.gz
 
