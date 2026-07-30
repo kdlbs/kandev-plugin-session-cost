@@ -78,3 +78,11 @@ Install the tarball via Settings → Plugins → Install plugin (upload), or:
 ```sh
 curl -F package=@kandev-session-cost-0.1.1.tar.gz http://localhost:8080/api/plugins/install
 ```
+
+## CI and releases
+
+Pull requests run CI for module tidiness, formatting, vetting, and tests, plus
+a separate host-build and five-platform package check. Pushing a `v*` tag that
+matches `manifest.yaml`'s version repeats verification, packages the plugin,
+extracts its internal `checksums.txt`, and publishes both the tarball and that
+checksum file in a GitHub Release.

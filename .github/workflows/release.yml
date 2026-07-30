@@ -39,12 +39,18 @@ jobs:
           go-version-file: plugin/go.mod
           cache-dependency-path: plugin/go.sum
 
+      - name: Verify release version
+        working-directory: plugin
+        run: |
+          version="$(sed -nE 's/^version: "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' manifest.yaml)"
+          test "$GITHUB_REF_NAME" = "v$version"
+
       - name: Verify (fmt, vet, test)
         working-directory: plugin
         run: |
-          test -z "$(gofmt -l ./server)" || { echo "gofmt needed:"; gofmt -l ./server; exit 1; }
-          go vet ./server/...
-          go test ./server/...
+          test -z "$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
+          make vet
+          make test
 
       - name: Package (all platforms)
         working-directory: plugin
