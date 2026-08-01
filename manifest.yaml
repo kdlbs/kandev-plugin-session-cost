@@ -1,6 +1,6 @@
 id: "kandev-session-cost"
 api_version: 1
-version: "0.1.1"
+version: "0.1.2"
 display_name: "Session Cost"
 description: "Adds a cost icon to the chat bar showing the current session's spend, cost-per-turn, and per-model breakdown on hover — resolved from the agent transcript by the tokscale CLI."
 author: "kandev"
