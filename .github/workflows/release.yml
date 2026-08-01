@@ -46,7 +46,7 @@ jobs:
           }
 
       - name: Check out main and release tags
-        uses: actions/checkout@v4
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 0
 
@@ -155,20 +155,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout plugin
-        uses: actions/checkout@v4
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           path: plugin
           ref: ${{ github.event_name == 'push' && github.ref || needs.prepare.outputs.tag }}
 
       - name: Checkout kandev SDK
-        uses: actions/checkout@v4
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           repository: kdlbs/kandev
           path: kandev
           sparse-checkout: apps/backend
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: plugin/go.mod
           cache-dependency-path: plugin/go.sum
@@ -189,7 +189,7 @@ jobs:
         run: tar -xzf kandev-session-cost-*.tar.gz checksums.txt
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.event_name == 'push' && github.ref_name || needs.prepare.outputs.tag }}
           files: |
