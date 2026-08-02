@@ -272,6 +272,9 @@ function makeSessionCostAction(host) {
     var openHook = React.useState(false);
     var open = openHook[0];
     var setOpen = openHook[1];
+    var pinnedHook = React.useState(false);
+    var pinned = pinnedHook[0];
+    var setPinned = pinnedHook[1];
     var stateHook = React.useState({ loading: false, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
@@ -346,6 +349,7 @@ function makeSessionCostAction(host) {
             },
             onClick: function () {
               pinnedRef.current = !pinnedRef.current;
+              setPinned(pinnedRef.current);
               setOpen(pinnedRef.current);
               if (pinnedRef.current) load(false);
             },
@@ -354,7 +358,35 @@ function makeSessionCostAction(host) {
           inlineCost(h, loaded),
         ),
       ),
-      h(TooltipContent, { side: "top", align: "end", className: "px-3 py-2.5" }, tooltipBody(h, ui, state)),
+      h(
+        TooltipContent,
+        { side: "top", align: "end", className: "pointer-events-auto px-3 py-2.5" },
+        h(
+          "div",
+          {
+            "aria-busy": state.loading,
+            style: { display: "flex", flexDirection: "column", gap: "8px" },
+          },
+          tooltipBody(h, ui, state),
+          pinned
+            ? h(
+                Button,
+                {
+                  type: "button",
+                  variant: "ghost",
+                  size: "sm",
+                  className: "min-h-11 w-full cursor-pointer",
+                  "aria-label": "Refresh session cost",
+                  disabled: state.loading,
+                  onClick: function () {
+                    load(true);
+                  },
+                },
+                state.loading ? "Refreshing…" : "Refresh",
+              )
+            : null,
+        ),
+      ),
     );
   };
 }

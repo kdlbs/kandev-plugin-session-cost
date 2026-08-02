@@ -24,6 +24,10 @@ function findElement(node, predicate) {
   return findElement(node.children, predicate);
 }
 
+function flushPromises() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 function createReactHarness() {
   const hooks = [];
   let component;
@@ -132,6 +136,15 @@ function createActionHarness() {
     tooltip() {
       return findElement(react.tree(), (node) => node.type === "Tooltip");
     },
+    refresh() {
+      return findElement(
+        react.tree(),
+        (node) => node.type === "Button" && node.props["aria-label"] === "Refresh session cost",
+      );
+    },
+    busyRegion() {
+      return findElement(react.tree(), (node) => node.props && "aria-busy" in node.props);
+    },
   };
 }
 
@@ -165,8 +178,7 @@ test("focus then click shares one request and stays open through its result", as
     tokscale: { installed: true },
     acp_session_id: "acp-1",
   });
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushPromises();
 
   assert.equal(view.tooltip().props.open, true);
 });
@@ -186,8 +198,7 @@ test("second tap closes without loading and cached reopen stays request-free", a
     tokscale: { installed: true },
     acp_session_id: "acp-1",
   });
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushPromises();
 
   view.trigger().props.onClick();
   assert.equal(view.tooltip().props.open, false);
@@ -196,4 +207,52 @@ test("second tap closes without loading and cached reopen stays request-free", a
   view.trigger().props.onClick();
   assert.equal(view.tooltip().props.open, true);
   assert.equal(view.requests.length, 1);
+});
+
+test("pinned Refresh forces one request and stays open while disabled", async () => {
+  const view = createActionHarness();
+
+  view.trigger().props.onClick();
+  view.requests[0].resolve({
+    found: true,
+    cost: 1,
+    turns: 1,
+    input: 10,
+    output: 5,
+    cache_read: 0,
+    models: [],
+    tokscale: { installed: true },
+    acp_session_id: "acp-1",
+  });
+  await flushPromises();
+
+  assert.ok(view.refresh());
+  assert.equal(view.refresh().props.type, "button");
+  assert.match(view.refresh().props.className, /min-h-11/);
+
+  view.refresh().props.onClick();
+
+  assert.equal(view.requests.length, 2);
+  assert.equal(view.tooltip().props.open, true);
+  assert.equal(view.refresh().props.disabled, true);
+  assert.equal(view.busyRegion().props["aria-busy"], true);
+
+  view.refresh().props.onClick();
+  assert.equal(view.requests.length, 2);
+
+  view.requests[1].resolve({
+    found: true,
+    cost: 2,
+    turns: 1,
+    input: 20,
+    output: 10,
+    cache_read: 0,
+    models: [],
+    tokscale: { installed: true },
+    acp_session_id: "acp-1",
+  });
+  await flushPromises();
+
+  assert.equal(view.tooltip().props.open, true);
+  assert.equal(view.refresh().props.disabled, false);
 });
