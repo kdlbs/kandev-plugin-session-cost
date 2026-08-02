@@ -101,8 +101,12 @@ function createActionHarness() {
     ui,
     api: {
       fetch(url) {
-        requests.push(url);
-        return new Promise(() => {});
+        let resolve;
+        const promise = new Promise((nextResolve) => {
+          resolve = (data) => nextResolve({ json: () => Promise.resolve(data) });
+        });
+        requests.push({ url, resolve });
+        return promise;
       },
     },
   };
@@ -138,4 +142,31 @@ test("first tap pins details open and starts one initial request", () => {
 
   assert.equal(view.tooltip().props.open, true);
   assert.equal(view.requests.length, 1);
+});
+
+test("focus then click shares one request and stays open through its result", async () => {
+  const view = createActionHarness();
+  const trigger = view.trigger();
+
+  trigger.props.onFocus();
+  trigger.props.onClick();
+
+  assert.equal(view.requests.length, 1);
+  assert.equal(view.tooltip().props.open, true);
+
+  view.requests[0].resolve({
+    found: true,
+    cost: 1.25,
+    turns: 1,
+    input: 100,
+    output: 50,
+    cache_read: 0,
+    models: [],
+    tokscale: { installed: true },
+    acp_session_id: "acp-1",
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(view.tooltip().props.open, true);
 });

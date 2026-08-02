@@ -277,12 +277,15 @@ function makeSessionCostAction(host) {
     var setState = stateHook[1];
     var pinnedRef = React.useRef(false);
     var loadedForRef = React.useRef(null);
+    var inFlightForRef = React.useRef(null);
 
     function load(force) {
       var active = ctx.activeSessionId;
       if (!active) return;
+      if (inFlightForRef.current === active) return;
       if (!force && loadedForRef.current === active && (state.data || state.loading)) return;
       loadedForRef.current = active;
+      inFlightForRef.current = active;
       setState({ loading: true, data: null, error: null });
       var qs =
         "webhooks/session-cost?task_id=" +
@@ -295,9 +298,11 @@ function makeSessionCostAction(host) {
           return r.json();
         })
         .then(function (data) {
+          if (inFlightForRef.current === active) inFlightForRef.current = null;
           setState({ loading: false, data: data, error: null });
         })
         .catch(function (err) {
+          if (inFlightForRef.current === active) inFlightForRef.current = null;
           setState({
             loading: false,
             data: null,
