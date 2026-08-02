@@ -269,9 +269,13 @@ function makeSessionCostAction(host) {
 
   return function SessionCostAction(props) {
     var ctx = (props && props.slotProps) || {};
+    var openHook = React.useState(false);
+    var open = openHook[0];
+    var setOpen = openHook[1];
     var stateHook = React.useState({ loading: false, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
+    var pinnedRef = React.useRef(false);
     var loadedForRef = React.useRef(null);
 
     function load(force) {
@@ -307,7 +311,13 @@ function makeSessionCostAction(host) {
 
     return h(
       Tooltip,
-      null,
+      {
+        open: open,
+        onOpenChange: function (nextOpen) {
+          if (!nextOpen && pinnedRef.current) return;
+          setOpen(nextOpen);
+        },
+      },
       h(
         TooltipTrigger,
         { asChild: true },
@@ -322,6 +332,7 @@ function makeSessionCostAction(host) {
               (loaded && loaded.found ? "h-7 px-1.5 " : "h-7 w-7 ") +
               "cursor-pointer text-muted-foreground hover:text-foreground hover:bg-primary/10",
             "aria-label": "Session cost",
+            "aria-expanded": open,
             onMouseEnter: function () {
               load(false);
             },
@@ -329,7 +340,9 @@ function makeSessionCostAction(host) {
               load(false);
             },
             onClick: function () {
-              load(true);
+              pinnedRef.current = !pinnedRef.current;
+              setOpen(pinnedRef.current);
+              if (pinnedRef.current) load(false);
             },
           },
           coinsIcon(h, 16, iconColor),
