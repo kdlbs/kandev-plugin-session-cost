@@ -8,7 +8,45 @@ function bundleSource() {
 }
 
 function element(type, props, ...children) {
-  return { type, props: props || {}, children: children.flat(Infinity) };
+  const node = { type, props: props || {}, children: children.flat(Infinity) };
+  if (node.props.ref && typeof node.props.ref === "object") {
+    node.props.ref.current = {
+      contains(target) {
+        return target === node.dom || Boolean(target && target.insideTrigger);
+      },
+    };
+  }
+  node.dom = new FakeElement();
+  return node;
+}
+
+class FakeNode {}
+
+class FakeElement extends FakeNode {
+  constructor(closestResult = null) {
+    super();
+    this.closestResult = closestResult;
+  }
+
+  closest(selector) {
+    return selector === '[data-slot="tooltip-content"]' ? this.closestResult : null;
+  }
+}
+
+function createDocument() {
+  const listeners = new Map();
+  return {
+    addEventListener(type, listener) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type).add(listener);
+    },
+    removeEventListener(type, listener) {
+      listeners.get(type)?.delete(listener);
+    },
+    dispatchEvent(event) {
+      for (const listener of listeners.get(event.type) || []) listener(event);
+    },
+  };
 }
 
 function findElement(node, predicate) {
@@ -30,6 +68,7 @@ function flushPromises() {
 
 function createReactHarness() {
   const hooks = [];
+  let pendingEffects = [];
   let component;
   let props;
   let cursor = 0;
@@ -52,8 +91,19 @@ function createReactHarness() {
       if (!(index in hooks)) hooks[index] = { current: initial };
       return hooks[index];
     },
-    useEffect() {
-      cursor++;
+    useEffect(effect, dependencies) {
+      const index = cursor++;
+      const previous = hooks[index];
+      const changed =
+        !previous ||
+        !dependencies ||
+        !previous.dependencies ||
+        dependencies.some((value, dependencyIndex) => value !== previous.dependencies[dependencyIndex]);
+      if (!changed) return;
+      pendingEffects.push(() => {
+        if (previous && previous.cleanup) previous.cleanup();
+        hooks[index] = { dependencies, cleanup: effect() };
+      });
     },
   };
 
@@ -61,6 +111,9 @@ function createReactHarness() {
     if (nextProps) props = nextProps;
     cursor = 0;
     tree = component(props);
+    const effects = pendingEffects;
+    pendingEffects = [];
+    effects.forEach((effect) => effect());
     return tree;
   }
 
@@ -83,6 +136,7 @@ function createActionHarness() {
   let Action;
   const requests = [];
   const react = createReactHarness();
+  const document = createDocument();
   const ui = Object.fromEntries(
     ["Button", "Spinner", "Tooltip", "TooltipTrigger", "TooltipContent"].map((name) => [name, name]),
   );
@@ -93,8 +147,11 @@ function createActionHarness() {
       },
     },
     encodeURIComponent,
+    document,
+    Element: FakeElement,
     isFinite,
     Math,
+    Node: FakeNode,
     String,
   };
   vm.runInNewContext(bundleSource(), sandbox);
@@ -129,6 +186,7 @@ function createActionHarness() {
 
   return {
     requests,
+    document,
     tree: react.tree,
     trigger() {
       return findElement(react.tree(), (node) => node.type === "Button" && node.props.id === "session-cost-action");
@@ -255,4 +313,24 @@ test("pinned Refresh forces one request and stays open while disabled", async ()
 
   assert.equal(view.tooltip().props.open, true);
   assert.equal(view.refresh().props.disabled, false);
+});
+
+test("inside interaction stays open while outside pointer and Escape dismiss", () => {
+  const view = createActionHarness();
+
+  view.trigger().props.onClick();
+  view.document.dispatchEvent({
+    type: "pointerdown",
+    target: new FakeElement({ dataset: { slot: "tooltip-content" } }),
+  });
+  assert.equal(view.tooltip().props.open, true);
+
+  view.document.dispatchEvent({ type: "pointerdown", target: new FakeElement() });
+  assert.equal(view.tooltip().props.open, false);
+  assert.equal(view.requests.length, 1);
+
+  view.trigger().props.onClick();
+  view.document.dispatchEvent({ type: "keydown", key: "Escape" });
+  assert.equal(view.tooltip().props.open, false);
+  assert.equal(view.requests.length, 1);
 });

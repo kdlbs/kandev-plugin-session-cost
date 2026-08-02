@@ -279,8 +279,39 @@ function makeSessionCostAction(host) {
     var state = stateHook[0];
     var setState = stateHook[1];
     var pinnedRef = React.useRef(false);
+    var triggerRef = React.useRef(null);
     var loadedForRef = React.useRef(null);
     var inFlightForRef = React.useRef(null);
+
+    React.useEffect(function () {
+      function closePinnedDetails() {
+        pinnedRef.current = false;
+        setPinned(false);
+        setOpen(false);
+      }
+
+      function closeOnOutsidePointer(event) {
+        if (!pinnedRef.current || !(event.target instanceof Node)) return;
+        if (
+          (triggerRef.current && triggerRef.current.contains(event.target)) ||
+          (event.target instanceof Element && event.target.closest('[data-slot="tooltip-content"]'))
+        ) {
+          return;
+        }
+        closePinnedDetails();
+      }
+
+      function closeOnEscape(event) {
+        if (event.key === "Escape" && pinnedRef.current) closePinnedDetails();
+      }
+
+      document.addEventListener("pointerdown", closeOnOutsidePointer);
+      document.addEventListener("keydown", closeOnEscape);
+      return function () {
+        document.removeEventListener("pointerdown", closeOnOutsidePointer);
+        document.removeEventListener("keydown", closeOnEscape);
+      };
+    }, []);
 
     function load(force) {
       var active = ctx.activeSessionId;
@@ -332,6 +363,7 @@ function makeSessionCostAction(host) {
         h(
           Button,
           {
+            ref: triggerRef,
             id: "session-cost-action",
             type: "button",
             variant: "ghost",
