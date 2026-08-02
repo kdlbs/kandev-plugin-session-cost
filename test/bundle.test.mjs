@@ -171,10 +171,12 @@ function createActionHarness() {
     api: {
       fetch(url) {
         let resolve;
-        const promise = new Promise((nextResolve) => {
+        let reject;
+        const promise = new Promise((nextResolve, nextReject) => {
           resolve = (data) => nextResolve({ json: () => Promise.resolve(data) });
+          reject = nextReject;
         });
-        requests.push({ url, resolve });
+        requests.push({ url, resolve, reject });
         return promise;
       },
     },
@@ -207,6 +209,9 @@ function createActionHarness() {
     },
     tooltip() {
       return findElement(react.tree(), (node) => node.type === "Tooltip");
+    },
+    tooltipContent() {
+      return findElement(react.tree(), (node) => node.type === "TooltipContent");
     },
     refresh() {
       return findElement(
@@ -388,4 +393,72 @@ test("session changes close details and ignore the prior session response", asyn
 
   assert.match(view.text(), /\$2\.00/);
   assert.doesNotMatch(view.text(), /\$9\.00/);
+});
+
+test("hover and focus stay ephemeral, accessible, and cache-aware", async () => {
+  const view = createActionHarness();
+  const trigger = view.trigger();
+
+  view.tooltip().props.onOpenChange(true);
+  trigger.props.onMouseEnter();
+  trigger.props.onFocus();
+
+  assert.equal(view.requests.length, 1);
+  assert.equal(view.trigger().props["aria-label"], "Session cost");
+  assert.equal(view.trigger().props["aria-expanded"], true);
+  assert.equal(view.busyRegion().props["aria-busy"], true);
+  assert.equal(view.refresh(), null);
+  assert.match(view.tooltipContent().props.className, /pointer-events-auto/);
+  assert.match(view.text(), /Calculating cost/);
+
+  view.requests[0].resolve({
+    found: true,
+    cost: 3,
+    turns: 1,
+    input: 30,
+    output: 15,
+    cache_read: 0,
+    models: [],
+    tokscale: { installed: true },
+    acp_session_id: "acp-1",
+  });
+  await flushPromises();
+
+  assert.equal(view.busyRegion().props["aria-busy"], false);
+  assert.match(view.text(), /\$3\.00/);
+  assert.equal(view.refresh(), null);
+
+  view.trigger().props.onMouseEnter();
+  view.trigger().props.onFocus();
+  assert.equal(view.requests.length, 1);
+
+  view.tooltip().props.onOpenChange(false);
+  assert.equal(view.tooltip().props.open, false);
+});
+
+test("Refresh error renders in place and re-enables the native button", async () => {
+  const view = createActionHarness();
+
+  view.trigger().props.onClick();
+  view.requests[0].resolve({
+    found: false,
+    cost: 0,
+    turns: 0,
+    input: 0,
+    output: 0,
+    cache_read: 0,
+    models: [],
+    tokscale: { installed: true },
+    acp_session_id: "acp-1",
+  });
+  await flushPromises();
+
+  view.refresh().props.onClick();
+  view.requests[1].reject(new Error("network down"));
+  await flushPromises();
+
+  assert.equal(view.tooltip().props.open, true);
+  assert.match(view.text(), /Couldn't load cost: network down/);
+  assert.equal(view.refresh().props.type, "button");
+  assert.equal(view.refresh().props.disabled, false);
 });
