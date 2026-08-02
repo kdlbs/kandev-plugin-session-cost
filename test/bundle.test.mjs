@@ -66,6 +66,13 @@ function flushPromises() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+function renderedText(node) {
+  if (Array.isArray(node)) return node.map(renderedText).join("");
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node !== "object") return String(node);
+  return renderedText(node.children);
+}
+
 function createReactHarness() {
   const hooks = [];
   let pendingEffects = [];
@@ -102,7 +109,8 @@ function createReactHarness() {
       if (!changed) return;
       pendingEffects.push(() => {
         if (previous && previous.cleanup) previous.cleanup();
-        hooks[index] = { dependencies, cleanup: effect() };
+        hooks[index] = { dependencies, cleanup: null };
+        hooks[index].cleanup = effect();
       });
     },
   };
@@ -187,6 +195,12 @@ function createActionHarness() {
   return {
     requests,
     document,
+    rerender(slotProps) {
+      react.render({ slotProps });
+    },
+    text() {
+      return renderedText(react.tree());
+    },
     tree: react.tree,
     trigger() {
       return findElement(react.tree(), (node) => node.type === "Button" && node.props.id === "session-cost-action");
@@ -333,4 +347,45 @@ test("inside interaction stays open while outside pointer and Escape dismiss", (
   view.document.dispatchEvent({ type: "keydown", key: "Escape" });
   assert.equal(view.tooltip().props.open, false);
   assert.equal(view.requests.length, 1);
+});
+
+test("session changes close details and ignore the prior session response", async () => {
+  const view = createActionHarness();
+
+  view.trigger().props.onClick();
+  view.rerender({ taskId: "task-1", activeSessionId: "session-2", sessionIds: ["session-1", "session-2"] });
+
+  assert.equal(view.tooltip().props.open, false);
+
+  view.trigger().props.onClick();
+  assert.equal(view.requests.length, 2);
+  view.requests[1].resolve({
+    found: true,
+    cost: 2,
+    turns: 1,
+    input: 20,
+    output: 10,
+    cache_read: 0,
+    models: [],
+    tokscale: { installed: true },
+    acp_session_id: "acp-2",
+  });
+  await flushPromises();
+  assert.match(view.text(), /\$2\.00/);
+
+  view.requests[0].resolve({
+    found: true,
+    cost: 9,
+    turns: 1,
+    input: 90,
+    output: 45,
+    cache_read: 0,
+    models: [],
+    tokscale: { installed: true },
+    acp_session_id: "acp-1",
+  });
+  await flushPromises();
+
+  assert.match(view.text(), /\$2\.00/);
+  assert.doesNotMatch(view.text(), /\$9\.00/);
 });

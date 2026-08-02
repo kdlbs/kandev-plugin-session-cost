@@ -282,6 +282,29 @@ function makeSessionCostAction(host) {
     var triggerRef = React.useRef(null);
     var loadedForRef = React.useRef(null);
     var inFlightForRef = React.useRef(null);
+    var activeSessionRef = React.useRef(ctx.activeSessionId || null);
+    var generationRef = React.useRef(0);
+    var resetSessionRef = React.useRef(ctx.activeSessionId || null);
+
+    if (activeSessionRef.current !== (ctx.activeSessionId || null)) {
+      activeSessionRef.current = ctx.activeSessionId || null;
+      generationRef.current += 1;
+      loadedForRef.current = null;
+      inFlightForRef.current = null;
+    }
+
+    React.useEffect(
+      function () {
+        var active = ctx.activeSessionId || null;
+        if (resetSessionRef.current === active) return;
+        resetSessionRef.current = active;
+        pinnedRef.current = false;
+        setPinned(false);
+        setOpen(false);
+        setState({ loading: false, data: null, error: null });
+      },
+      [ctx.activeSessionId],
+    );
 
     React.useEffect(function () {
       function closePinnedDetails() {
@@ -316,10 +339,11 @@ function makeSessionCostAction(host) {
     function load(force) {
       var active = ctx.activeSessionId;
       if (!active) return;
-      if (inFlightForRef.current === active) return;
+      if (inFlightForRef.current && inFlightForRef.current.sessionId === active) return;
       if (!force && loadedForRef.current === active && (state.data || state.loading)) return;
+      var request = { sessionId: active, generation: generationRef.current };
       loadedForRef.current = active;
-      inFlightForRef.current = active;
+      inFlightForRef.current = request;
       setState({ loading: true, data: null, error: null });
       var qs =
         "webhooks/session-cost?task_id=" +
@@ -332,11 +356,13 @@ function makeSessionCostAction(host) {
           return r.json();
         })
         .then(function (data) {
-          if (inFlightForRef.current === active) inFlightForRef.current = null;
+          if (activeSessionRef.current !== active || generationRef.current !== request.generation) return;
+          if (inFlightForRef.current === request) inFlightForRef.current = null;
           setState({ loading: false, data: data, error: null });
         })
         .catch(function (err) {
-          if (inFlightForRef.current === active) inFlightForRef.current = null;
+          if (activeSessionRef.current !== active || generationRef.current !== request.generation) return;
+          if (inFlightForRef.current === request) inFlightForRef.current = null;
           setState({
             loading: false,
             data: null,
