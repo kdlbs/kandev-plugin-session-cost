@@ -1,7 +1,8 @@
 // Session Cost — chat-toolbar plugin. Registers a coins icon into the
-// "chat-input-actions" slot; hovering it fetches the current session's cost
-// from the plugin backend (which resolves the ACP transcript id server-side
-// via the Host data API, runs tokscale, and computes cost-per-turn). The whole
+// "chat-input-actions" slot; opening it fetches the current session's cost
+// once, and its pinned detail offers an explicit refresh. The plugin backend
+// resolves the ACP transcript id server-side via the Host data API, runs
+// tokscale, and computes cost-per-turn. The whole
 // payload — total spend, cost/turn, per-model split, and the amber/red colour
 // thresholds — is produced backend-side; this bundle only renders it.
 //
@@ -230,7 +231,7 @@ function tooltipBody(h, ui, state) {
   }
   if (state.error) return stateShell(h, header, "Couldn't load cost: " + state.error);
   var d = state.data;
-  if (!d) return stateShell(h, header, "Hover to load session cost");
+  if (!d) return stateShell(h, header, "Open to load session cost");
   if (d.tokscale && d.tokscale.installed === false) {
     return stateShell(h, header, "tokscale isn't available — set its command in Settings → Plugins → Session Cost.");
   }

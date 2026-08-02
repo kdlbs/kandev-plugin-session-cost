@@ -5,9 +5,10 @@ the chat bar** showing the spend of the current session — total cost,
 **cost-per-turn**, and a per-model breakdown — parsed from your local agent CLI
 transcript by the [tokscale](https://github.com/junhoyeo/tokscale) CLI.
 
-The amount is colour-coded by how much you've spent (green → amber → red), and
-after the first hover the cost stays pinned next to the icon so the bar always
-"says the cost".
+The amount is colour-coded by how much you've spent (green → amber → red). Hover
+or focus previews the details, while click or tap pins them open and exposes an
+explicit Refresh action. Once loaded, the cost stays next to the icon so the bar
+always "says the cost".
 
 ## Screenshots
 
@@ -28,10 +29,15 @@ manifest's `config_schema`:
 ## What it does
 
 - A coins button in the chat composer toolbar (`chat-input-actions` slot,
-  desktop + mobile). Hover / focus / click loads the current session's cost.
-- **Hover popover**: the headline amount (colour-coded by spend tier),
+  desktop + mobile). Hover or focus previews details; click or tap pins the same
+  detail surface open without recalculating.
+- **Pinnable details**: the headline amount (colour-coded by spend tier),
   **cost / turn**, token totals (input / output / cache read), and a per-model
-  table with a coloured dot per model.
+  table with a coloured dot per model. Tap the trigger again, tap outside, or
+  press Escape to close.
+- **Explicit refresh**: only pinned details show Refresh. It recalculates the
+  active session once, remains open while loading, and ignores repeated input
+  until the request finishes.
 - **Inline amount**: once loaded, the total is shown next to the icon in the
   tier colour.
 - Reads spend from tokscale, keyed on the agent transcript id. The backend
