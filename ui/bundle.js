@@ -270,41 +270,36 @@ function makeSessionCostAction(host) {
 
   return function SessionCostAction(props) {
     var ctx = (props && props.slotProps) || {};
+    var activeSession = ctx.activeSessionId || null;
     var openHook = React.useState(false);
     var open = openHook[0];
     var setOpen = openHook[1];
     var pinnedHook = React.useState(false);
     var pinned = pinnedHook[0];
     var setPinned = pinnedHook[1];
-    var stateHook = React.useState({ loading: false, data: null, error: null });
+    var stateHook = React.useState({ sessionId: activeSession, loading: false, data: null, error: null });
     var state = stateHook[0];
     var setState = stateHook[1];
     var pinnedRef = React.useRef(false);
     var triggerRef = React.useRef(null);
     var loadedForRef = React.useRef(null);
     var inFlightForRef = React.useRef(null);
-    var activeSessionRef = React.useRef(ctx.activeSessionId || null);
-    var generationRef = React.useRef(0);
-    var resetSessionRef = React.useRef(ctx.activeSessionId || null);
-
-    if (activeSessionRef.current !== (ctx.activeSessionId || null)) {
-      activeSessionRef.current = ctx.activeSessionId || null;
-      generationRef.current += 1;
-      loadedForRef.current = null;
-      inFlightForRef.current = null;
-    }
+    var resetSessionRef = React.useRef(activeSession);
 
     React.useEffect(
       function () {
-        var active = ctx.activeSessionId || null;
-        if (resetSessionRef.current === active) return;
-        resetSessionRef.current = active;
+        if (resetSessionRef.current === activeSession) return;
+        resetSessionRef.current = activeSession;
         pinnedRef.current = false;
+        loadedForRef.current = null;
+        if (inFlightForRef.current && inFlightForRef.current.sessionId !== activeSession) {
+          inFlightForRef.current = null;
+        }
         setPinned(false);
         setOpen(false);
-        setState({ loading: false, data: null, error: null });
+        setState({ sessionId: activeSession, loading: false, data: null, error: null });
       },
-      [ctx.activeSessionId],
+      [activeSession],
     );
 
     React.useEffect(function () {
@@ -337,15 +332,22 @@ function makeSessionCostAction(host) {
       };
     }, []);
 
+    var stateMatchesActive = state.sessionId === activeSession;
+    var visibleState = stateMatchesActive
+      ? state
+      : { sessionId: activeSession, loading: false, data: null, error: null };
+    var visibleOpen = stateMatchesActive ? open : false;
+    var visiblePinned = stateMatchesActive ? pinned : false;
+
     function load(force) {
-      var active = ctx.activeSessionId;
+      var active = activeSession;
       if (!active) return;
       if (inFlightForRef.current && inFlightForRef.current.sessionId === active) return;
-      if (!force && loadedForRef.current === active && (state.data || state.loading)) return;
-      var request = { sessionId: active, generation: generationRef.current };
+      if (!force && loadedForRef.current === active && (visibleState.data || visibleState.loading)) return;
+      var request = { sessionId: active };
       loadedForRef.current = active;
       inFlightForRef.current = request;
-      setState({ loading: true, data: null, error: null });
+      setState({ sessionId: active, loading: true, data: null, error: null });
       var qs =
         "webhooks/session-cost?task_id=" +
         encodeURIComponent(ctx.taskId || "") +
@@ -357,30 +359,37 @@ function makeSessionCostAction(host) {
           return r.json();
         })
         .then(function (data) {
-          if (activeSessionRef.current !== active || generationRef.current !== request.generation) return;
-          if (inFlightForRef.current === request) inFlightForRef.current = null;
-          setState({ loading: false, data: data, error: null });
+          if (inFlightForRef.current !== request) return;
+          inFlightForRef.current = null;
+          setState(function (current) {
+            if (current.sessionId !== active) return current;
+            return { sessionId: active, loading: false, data: data, error: null };
+          });
         })
         .catch(function (err) {
-          if (activeSessionRef.current !== active || generationRef.current !== request.generation) return;
-          if (inFlightForRef.current === request) inFlightForRef.current = null;
-          setState({
-            loading: false,
-            data: null,
-            error: String(err && err.message ? err.message : err),
+          if (inFlightForRef.current !== request) return;
+          inFlightForRef.current = null;
+          setState(function (current) {
+            if (current.sessionId !== active) return current;
+            return {
+              sessionId: active,
+              loading: false,
+              data: null,
+              error: String(err && err.message ? err.message : err),
+            };
           });
         });
     }
 
-    var loaded = !state.loading && !state.error ? state.data : null;
+    var loaded = !visibleState.loading && !visibleState.error ? visibleState.data : null;
     var iconColor = loaded && loaded.found ? tierColor(loaded.cost, loaded.warn_threshold, loaded.high_threshold) : undefined;
 
     return h(
       Tooltip,
       {
-        open: open,
+        open: visibleOpen,
         onOpenChange: function (nextOpen) {
-          if (!nextOpen && pinnedRef.current) return;
+          if (!nextOpen && stateMatchesActive && pinnedRef.current) return;
           setOpen(nextOpen);
         },
       },
@@ -399,7 +408,7 @@ function makeSessionCostAction(host) {
               (loaded && loaded.found ? "h-7 px-1.5 " : "h-7 w-7 ") +
               "cursor-pointer text-muted-foreground hover:text-foreground hover:bg-primary/10",
             "aria-label": "Session cost",
-            "aria-expanded": open,
+            "aria-expanded": visibleOpen,
             onMouseEnter: function () {
               load(false);
             },
@@ -407,7 +416,7 @@ function makeSessionCostAction(host) {
               load(false);
             },
             onClick: function () {
-              pinnedRef.current = !pinnedRef.current;
+              pinnedRef.current = stateMatchesActive ? !pinnedRef.current : true;
               setPinned(pinnedRef.current);
               setOpen(pinnedRef.current);
               if (pinnedRef.current) load(false);
@@ -423,11 +432,11 @@ function makeSessionCostAction(host) {
         h(
           "div",
           {
-            "aria-busy": state.loading,
+            "aria-busy": visibleState.loading,
             style: { display: "flex", flexDirection: "column", gap: "8px" },
           },
-          tooltipBody(h, ui, state),
-          pinned
+          tooltipBody(h, ui, visibleState),
+          visiblePinned
             ? h(
                 Button,
                 {
@@ -436,12 +445,12 @@ function makeSessionCostAction(host) {
                   size: "sm",
                   className: "min-h-11 w-full cursor-pointer",
                   "aria-label": "Refresh session cost",
-                  disabled: state.loading,
+                  disabled: visibleState.loading,
                   onClick: function () {
                     load(true);
                   },
                 },
-                state.loading ? "Refreshing…" : "Refresh",
+                visibleState.loading ? "Refreshing…" : "Refresh",
               )
             : null,
         ),

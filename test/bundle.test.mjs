@@ -66,6 +66,21 @@ function flushPromises() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+function costResponse(overrides = {}) {
+  return {
+    found: true,
+    cost: 1,
+    turns: 1,
+    input: 10,
+    output: 5,
+    cache_read: 0,
+    models: [],
+    tokscale: { installed: true },
+    acp_session_id: "acp-1",
+    ...overrides,
+  };
+}
+
 function renderedText(node) {
   if (Array.isArray(node)) return node.map(renderedText).join("");
   if (node == null || typeof node === "boolean") return "";
@@ -80,6 +95,8 @@ function createReactHarness() {
   let props;
   let cursor = 0;
   let tree;
+  let treeBeforeEffects;
+  let renderDepth = 0;
 
   const React = {
     useState(initial) {
@@ -117,11 +134,15 @@ function createReactHarness() {
 
   function render(nextProps) {
     if (nextProps) props = nextProps;
+    const outerRender = renderDepth === 0;
+    renderDepth += 1;
     cursor = 0;
     tree = component(props);
+    if (outerRender) treeBeforeEffects = tree;
     const effects = pendingEffects;
     pendingEffects = [];
     effects.forEach((effect) => effect());
+    renderDepth -= 1;
     return tree;
   }
 
@@ -135,6 +156,9 @@ function createReactHarness() {
     render,
     tree() {
       return tree;
+    },
+    treeBeforeEffects() {
+      return treeBeforeEffects;
     },
   };
 }
@@ -203,6 +227,12 @@ function createActionHarness() {
     text() {
       return renderedText(react.tree());
     },
+    textBeforeEffects() {
+      return renderedText(react.treeBeforeEffects());
+    },
+    tooltipBeforeEffects() {
+      return findElement(react.treeBeforeEffects(), (node) => node.type === "Tooltip");
+    },
     tree: react.tree,
     trigger() {
       return findElement(react.tree(), (node) => node.type === "Button" && node.props.id === "session-cost-action");
@@ -244,17 +274,7 @@ test("focus then click shares one request and stays open through its result", as
   assert.equal(view.requests.length, 1);
   assert.equal(view.tooltip().props.open, true);
 
-  view.requests[0].resolve({
-    found: true,
-    cost: 1.25,
-    turns: 1,
-    input: 100,
-    output: 50,
-    cache_read: 0,
-    models: [],
-    tokscale: { installed: true },
-    acp_session_id: "acp-1",
-  });
+  view.requests[0].resolve(costResponse({ cost: 1.25, input: 100, output: 50 }));
   await flushPromises();
 
   assert.equal(view.tooltip().props.open, true);
@@ -264,17 +284,7 @@ test("second tap closes without loading and cached reopen stays request-free", a
   const view = createActionHarness();
 
   view.trigger().props.onClick();
-  view.requests[0].resolve({
-    found: false,
-    cost: 0,
-    turns: 0,
-    input: 0,
-    output: 0,
-    cache_read: 0,
-    models: [],
-    tokscale: { installed: true },
-    acp_session_id: "acp-1",
-  });
+  view.requests[0].resolve(costResponse({ found: false, cost: 0, turns: 0, input: 0, output: 0 }));
   await flushPromises();
 
   view.trigger().props.onClick();
@@ -290,17 +300,7 @@ test("pinned Refresh forces one request and stays open while disabled", async ()
   const view = createActionHarness();
 
   view.trigger().props.onClick();
-  view.requests[0].resolve({
-    found: true,
-    cost: 1,
-    turns: 1,
-    input: 10,
-    output: 5,
-    cache_read: 0,
-    models: [],
-    tokscale: { installed: true },
-    acp_session_id: "acp-1",
-  });
+  view.requests[0].resolve(costResponse());
   await flushPromises();
 
   assert.ok(view.refresh());
@@ -317,17 +317,7 @@ test("pinned Refresh forces one request and stays open while disabled", async ()
   view.refresh().props.onClick();
   assert.equal(view.requests.length, 2);
 
-  view.requests[1].resolve({
-    found: true,
-    cost: 2,
-    turns: 1,
-    input: 20,
-    output: 10,
-    cache_read: 0,
-    models: [],
-    tokscale: { installed: true },
-    acp_session_id: "acp-1",
-  });
+  view.requests[1].resolve(costResponse({ cost: 2, input: 20, output: 10 }));
   await flushPromises();
 
   assert.equal(view.tooltip().props.open, true);
@@ -364,35 +354,29 @@ test("session changes close details and ignore the prior session response", asyn
 
   view.trigger().props.onClick();
   assert.equal(view.requests.length, 2);
-  view.requests[1].resolve({
-    found: true,
-    cost: 2,
-    turns: 1,
-    input: 20,
-    output: 10,
-    cache_read: 0,
-    models: [],
-    tokscale: { installed: true },
-    acp_session_id: "acp-2",
-  });
+  view.requests[1].resolve(costResponse({ cost: 2, input: 20, output: 10, acp_session_id: "acp-2" }));
   await flushPromises();
   assert.match(view.text(), /\$2\.00/);
 
-  view.requests[0].resolve({
-    found: true,
-    cost: 9,
-    turns: 1,
-    input: 90,
-    output: 45,
-    cache_read: 0,
-    models: [],
-    tokscale: { installed: true },
-    acp_session_id: "acp-1",
-  });
+  view.requests[0].resolve(costResponse({ cost: 9, input: 90, output: 45 }));
   await flushPromises();
 
   assert.match(view.text(), /\$2\.00/);
   assert.doesNotMatch(view.text(), /\$9\.00/);
+});
+
+test("session change render never exposes the prior cached details", async () => {
+  const view = createActionHarness();
+
+  view.trigger().props.onClick();
+  view.requests[0].resolve(costResponse({ cost: 9, input: 90, output: 45 }));
+  await flushPromises();
+  assert.match(view.text(), /\$9\.00/);
+
+  view.rerender({ taskId: "task-1", activeSessionId: "session-2", sessionIds: ["session-1", "session-2"] });
+
+  assert.equal(view.tooltipBeforeEffects().props.open, false);
+  assert.doesNotMatch(view.textBeforeEffects(), /\$9\.00/);
 });
 
 test("hover and focus stay ephemeral, accessible, and cache-aware", async () => {
@@ -411,17 +395,7 @@ test("hover and focus stay ephemeral, accessible, and cache-aware", async () => 
   assert.match(view.tooltipContent().props.className, /pointer-events-auto/);
   assert.match(view.text(), /Calculating cost/);
 
-  view.requests[0].resolve({
-    found: true,
-    cost: 3,
-    turns: 1,
-    input: 30,
-    output: 15,
-    cache_read: 0,
-    models: [],
-    tokscale: { installed: true },
-    acp_session_id: "acp-1",
-  });
+  view.requests[0].resolve(costResponse({ cost: 3, input: 30, output: 15 }));
   await flushPromises();
 
   assert.equal(view.busyRegion().props["aria-busy"], false);
@@ -440,17 +414,7 @@ test("Refresh error renders in place and re-enables the native button", async ()
   const view = createActionHarness();
 
   view.trigger().props.onClick();
-  view.requests[0].resolve({
-    found: false,
-    cost: 0,
-    turns: 0,
-    input: 0,
-    output: 0,
-    cache_read: 0,
-    models: [],
-    tokscale: { installed: true },
-    acp_session_id: "acp-1",
-  });
+  view.requests[0].resolve(costResponse({ found: false, cost: 0, turns: 0, input: 0, output: 0 }));
   await flushPromises();
 
   view.refresh().props.onClick();
