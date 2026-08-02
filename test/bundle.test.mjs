@@ -170,3 +170,30 @@ test("focus then click shares one request and stays open through its result", as
 
   assert.equal(view.tooltip().props.open, true);
 });
+
+test("second tap closes without loading and cached reopen stays request-free", async () => {
+  const view = createActionHarness();
+
+  view.trigger().props.onClick();
+  view.requests[0].resolve({
+    found: false,
+    cost: 0,
+    turns: 0,
+    input: 0,
+    output: 0,
+    cache_read: 0,
+    models: [],
+    tokscale: { installed: true },
+    acp_session_id: "acp-1",
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  view.trigger().props.onClick();
+  assert.equal(view.tooltip().props.open, false);
+  assert.equal(view.requests.length, 1);
+
+  view.trigger().props.onClick();
+  assert.equal(view.tooltip().props.open, true);
+  assert.equal(view.requests.length, 1);
+});
