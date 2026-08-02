@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0] - 2026-08-02
+
+### Changed
+
+- Make Session Cost details pinnable (#4) (e9d8d39)
+
+
 ## [0.1.3] - 2026-08-01
 
 ### Changed
