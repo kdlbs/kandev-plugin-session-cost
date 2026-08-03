@@ -209,6 +209,9 @@ function costCard(h, d) {
               "div",
               {
                 style: {
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  columnGap: "8px",
                   paddingLeft: "13px",
                   opacity: 0.6,
                   fontSize: "10px",
@@ -218,7 +221,21 @@ function costCard(h, d) {
                   textOverflow: "ellipsis",
                 },
               },
-              "In " + fmtCompact(m.input) + " · Out " + fmtCompact(m.output) + " · Cache " + fmtCompact(m.cache_read),
+              h(
+                "span",
+                { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "left" } },
+                "In " + fmtCompact(m.input),
+              ),
+              h(
+                "span",
+                { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "center" } },
+                "Out " + fmtCompact(m.output),
+              ),
+              h(
+                "span",
+                { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" } },
+                "Cache " + fmtCompact(m.cache_read),
+              ),
             ),
           );
         }),
