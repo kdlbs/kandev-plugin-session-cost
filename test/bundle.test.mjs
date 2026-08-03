@@ -280,7 +280,7 @@ test("focus then click shares one request and stays open through its result", as
   assert.equal(view.tooltip().props.open, true);
 });
 
-test("per-model rows show compact token details", async () => {
+test("per-model rows use compact token labels", async () => {
   const view = createActionHarness();
 
   view.trigger().props.onClick();
@@ -292,7 +292,7 @@ test("per-model rows show compact token details", async () => {
   await flushPromises();
 
   assert.match(view.text(), /gpt-5\.6-sol/);
-  assert.match(view.text(), /Input 2M · Output 168K · Cache read 75\.6M/);
+  assert.match(view.text(), /In 2M · Out 168K · Cache 75\.6M/);
 });
 
 test("second tap closes without loading and cached reopen stays request-free", async () => {

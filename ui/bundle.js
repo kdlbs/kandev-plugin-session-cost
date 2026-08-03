@@ -218,7 +218,7 @@ function costCard(h, d) {
                   textOverflow: "ellipsis",
                 },
               },
-              "Input " + fmtCompact(m.input) + " · Output " + fmtCompact(m.output) + " · Cache read " + fmtCompact(m.cache_read),
+              "In " + fmtCompact(m.input) + " · Out " + fmtCompact(m.output) + " · Cache " + fmtCompact(m.cache_read),
             ),
           );
         }),
