@@ -181,26 +181,45 @@ function costCard(h, d) {
         models.map(function (m) {
           return h(
             "div",
-            { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px", fontSize: "11px" } },
+            { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
             h(
-              "span",
-              { style: { display: "inline-flex", alignItems: "center", gap: "6px", minWidth: 0 } },
-              h("span", {
-                style: {
-                  width: "7px",
-                  height: "7px",
-                  borderRadius: "9999px",
-                  background: dotColor(m.model),
-                  flex: "0 0 auto",
-                },
-              }),
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px", fontSize: "11px" } },
               h(
                 "span",
-                { style: { opacity: 0.75, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-                m.model,
+                { style: { display: "inline-flex", alignItems: "center", gap: "6px", minWidth: 0 } },
+                h("span", {
+                  style: {
+                    width: "7px",
+                    height: "7px",
+                    borderRadius: "9999px",
+                    background: dotColor(m.model),
+                    flex: "0 0 auto",
+                  },
+                }),
+                h(
+                  "span",
+                  { style: { opacity: 0.75, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                  m.model,
+                ),
               ),
+              h("span", { style: { fontVariantNumeric: "tabular-nums" } }, fmtUSD(m.cost)),
             ),
-            h("span", { style: { fontVariantNumeric: "tabular-nums" } }, fmtUSD(m.cost)),
+            h(
+              "div",
+              {
+                style: {
+                  paddingLeft: "13px",
+                  opacity: 0.6,
+                  fontSize: "10px",
+                  fontVariantNumeric: "tabular-nums",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                },
+              },
+              "Input " + fmtCompact(m.input) + " · Output " + fmtCompact(m.output) + " · Cache read " + fmtCompact(m.cache_read),
+            ),
           );
         }),
       ),

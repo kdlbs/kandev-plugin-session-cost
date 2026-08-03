@@ -33,8 +33,8 @@ manifest's `config_schema`:
   detail surface open without recalculating.
 - **Pinnable details**: the headline amount (colour-coded by spend tier),
   **cost / turn**, token totals (input / output / cache read), and a per-model
-  table with a coloured dot per model. Tap the trigger again, tap outside, or
-  press Escape to close.
+  breakdown showing each model's cost plus its input / output / cache-read
+  counts. Tap the trigger again, tap outside, or press Escape to close.
 - **Explicit refresh**: only pinned details show Refresh. It recalculates the
   active session once, remains open while loading, and ignores repeated input
   until the request finishes.

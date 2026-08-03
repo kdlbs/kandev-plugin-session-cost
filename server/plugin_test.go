@@ -129,6 +129,8 @@ func TestHandleWebhook_FoundSumsSessionRows(t *testing.T) {
 	require.Equal(t, int64(5), d.Turns, "sums messageCount across the session's model rows")
 	require.InDelta(t, 1.30/5.0, d.CostPerTurn, 1e-9, "avg cost per turn computed server-side")
 	require.Len(t, d.Models, 2)
+	require.Equal(t, sessionModel{Model: "claude-opus-4-8", Input: 1000, Output: 500, CacheRead: 200, Cost: 1.25}, d.Models[0])
+	require.Equal(t, sessionModel{Model: "claude-haiku-4-5", Input: 50, Output: 20, CacheRead: 0, Cost: 0.05}, d.Models[1])
 	// Default thresholds echoed for the UI to colour by.
 	require.Equal(t, defaultWarnThreshold, d.WarnThreshold)
 	require.Equal(t, defaultHighThreshold, d.HighThreshold)
