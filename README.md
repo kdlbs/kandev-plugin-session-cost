@@ -82,7 +82,7 @@ make package        # tarball for all 5 supported platforms
 Install the tarball via Settings → Plugins → Install plugin (upload), or:
 
 ```sh
-curl -F package=@kandev-session-cost-0.2.1.tar.gz http://localhost:8080/api/plugins/install
+curl -F package=@kandev-session-cost-0.2.2.tar.gz http://localhost:8080/api/plugins/install
 ```
 
 ## CI and releases

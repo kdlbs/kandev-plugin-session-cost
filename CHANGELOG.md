@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2] - 2026-08-03
+
+### Changed
+
+- Show per-model token usage (#6) (1a6e45f)
+
+
 ## [0.2.1] - 2026-08-03
 
 ### Changed
