@@ -78,8 +78,11 @@ type sessionCostResponse struct {
 }
 
 type sessionModel struct {
-	Model string  `json:"model"`
-	Cost  float64 `json:"cost"`
+	Model     string  `json:"model"`
+	Input     int64   `json:"input"`
+	Output    int64   `json:"output"`
+	CacheRead int64   `json:"cache_read"`
+	Cost      float64 `json:"cost"`
 }
 
 func (p *plugin) HandleWebhook(ctx context.Context, req *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error) {
@@ -147,7 +150,13 @@ func (p *plugin) sessionCost(ctx context.Context, taskID, activeSessionID string
 		resp.Output += e.Output
 		resp.CacheRead += e.CacheRead
 		resp.Turns += e.MessageCount
-		resp.Models = append(resp.Models, sessionModel{Model: e.Model, Cost: e.Cost})
+		resp.Models = append(resp.Models, sessionModel{
+			Model:     e.Model,
+			Input:     e.Input,
+			Output:    e.Output,
+			CacheRead: e.CacheRead,
+			Cost:      e.Cost,
+		})
 	}
 	if resp.Turns > 0 {
 		resp.CostPerTurn = resp.Cost / float64(resp.Turns)
