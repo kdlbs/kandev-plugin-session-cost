@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-08-03
+
+### Changed
+
+- chore: pin tokscale npx fallback to 4.9.0 (#5) (f2e4da5)
+
+
 ## [0.2.0] - 2026-08-02
 
 ### Changed
