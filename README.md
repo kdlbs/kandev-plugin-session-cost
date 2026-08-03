@@ -53,7 +53,7 @@ manifest's `config_schema`:
 Settings → Plugins → Session Cost (generated from the manifest `config_schema`):
 
 - `command` — explicit tokscale invocation (path or full command); empty
-  auto-detects (`tokscale` on PATH, else pinned `npx -y tokscale@4.5.3`).
+  auto-detects (`tokscale` on PATH, else pinned `npx -y tokscale@4.9.0`).
 - `warn_threshold` (USD, default 1) — amount turns **amber** at or above this.
 - `high_threshold` (USD, default 10) — amount turns **red** at or above this.
 

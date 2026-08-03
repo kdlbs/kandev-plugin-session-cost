@@ -8,7 +8,7 @@ import (
 // pinnedTokscale is the npx fallback used when tokscale is neither configured
 // nor on PATH. Pinned so the JSON output shape can't drift under us; bump
 // deliberately after checking `models --json` still parses.
-const pinnedTokscale = "tokscale@4.5.3"
+const pinnedTokscale = "tokscale@4.9.0"
 
 // Command sources, reported in InstallStatus.Source so the UI can explain
 // where the tokscale invocation came from.
@@ -42,7 +42,7 @@ func resolveCommand(configured string, lookPath func(string) (string, error)) re
 // what version. Embedded in every session-cost payload so the UI can render
 // setup guidance from the same shape it always reads.
 type InstallStatus struct {
-	// Command is the resolved argv joined for display, e.g. "npx -y tokscale@4.5.3".
+	// Command is the resolved argv joined for display, e.g. "npx -y tokscale@4.9.0".
 	Command string `json:"command"`
 	// Source is where the command came from: "settings", "path" or "npx".
 	Source    string `json:"source"`
@@ -55,13 +55,13 @@ type InstallStatus struct {
 // production (see newPlugin), injected for tests.
 type runner func(ctx context.Context, name string, args ...string) ([]byte, error)
 
-// commandDisplay renders the resolved argv for humans ("npx -y tokscale@4.5.3").
+// commandDisplay renders the resolved argv for humans ("npx -y tokscale@4.9.0").
 func commandDisplay(cmd resolvedCommand) string {
 	return strings.Join(cmd.Argv, " ")
 }
 
 // probeInstall checks the resolved command works by running `--version` and
-// parsing the version out of its output ("tokscale 4.5.3").
+// parsing the version out of its output ("tokscale 4.9.0").
 func probeInstall(ctx context.Context, cmd resolvedCommand, run runner) InstallStatus {
 	status := InstallStatus{Command: commandDisplay(cmd), Source: cmd.Source}
 	out, err := run(ctx, cmd.Argv[0], append(cmd.Argv[1:], "--version")...)
@@ -74,7 +74,7 @@ func probeInstall(ctx context.Context, cmd resolvedCommand, run runner) InstallS
 	return status
 }
 
-// parseVersion extracts "4.5.3" from tokscale's `--version` output, which may
+// parseVersion extracts "4.9.0" from tokscale's `--version` output, which may
 // be preceded by npx install noise. Empty when no version line is found.
 func parseVersion(out string) string {
 	for _, line := range strings.Split(out, "\n") {
