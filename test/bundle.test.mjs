@@ -280,7 +280,7 @@ test("focus then click shares one request and stays open through its result", as
   assert.equal(view.tooltip().props.open, true);
 });
 
-test("per-model rows show compact token details", async () => {
+test("per-model rows use compact token labels", async () => {
   const view = createActionHarness();
 
   view.trigger().props.onClick();
@@ -292,7 +292,34 @@ test("per-model rows show compact token details", async () => {
   await flushPromises();
 
   assert.match(view.text(), /gpt-5\.6-sol/);
-  assert.match(view.text(), /Input 2M · Output 168K · Cache read 75\.6M/);
+  assert.match(view.text(), /In 2MOut 168KCache 75\.6M/);
+});
+
+test("per-model token columns align left, center, and right", async () => {
+  const view = createActionHarness();
+
+  view.trigger().props.onClick();
+  view.requests[0].resolve(
+    costResponse({
+      models: [
+        { model: "gpt-5.6-sol", cost: 15.01, input: 2000000, output: 168000, cache_read: 75600000 },
+        { model: "gpt-5.6-luna", cost: 0.83, input: 200000, output: 11700, cache_read: 300000 },
+      ],
+    }),
+  );
+  await flushPromises();
+
+  const tokenGrid = findElement(
+    view.tree(),
+    (node) => node.type === "div" && node.props.style && node.props.style.gridTemplateColumns === "repeat(3, minmax(0, 1fr))",
+  );
+  assert.ok(tokenGrid);
+  assert.equal(tokenGrid.children.length, 3);
+  assert.equal(tokenGrid.children[0].props.style.textAlign, "left");
+  assert.equal(tokenGrid.children[1].props.style.textAlign, "center");
+  assert.equal(tokenGrid.children[2].props.style.textAlign, "right");
+  assert.match(view.text(), /In 2MOut 168KCache 75\.6M/);
+  assert.match(view.text(), /In 200KOut 11\.7KCache 300K/);
 });
 
 test("second tap closes without loading and cached reopen stays request-free", async () => {
