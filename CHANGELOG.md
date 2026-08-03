@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3] - 2026-08-03
+
+### Changed
+
+- Shorten per-model token labels (#7) (e611b48)
+
+
 ## [0.2.2] - 2026-08-03
 
 ### Changed
