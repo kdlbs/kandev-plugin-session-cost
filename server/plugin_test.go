@@ -80,7 +80,7 @@ func webhookGet(key, query string) *pluginsdk.WebhookRequest {
 func modelsRunner(modelsOut []byte, modelsErr error) runner {
 	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		if len(args) > 0 && args[len(args)-1] == "--version" {
-			return []byte("tokscale 4.5.3\n"), nil
+			return []byte("tokscale 4.9.0\n"), nil
 		}
 		return modelsOut, modelsErr
 	}
