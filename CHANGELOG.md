@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] - 2026-09-03
+
+### Changed
+
+- chore: update tokscale fallback to 4.15.1 (#9) (869c65f)
+
+
 ## [0.2.3] - 2026-08-03
 
 ### Changed
