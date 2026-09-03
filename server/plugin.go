@@ -255,7 +255,7 @@ func jsonResponse(status int32, body []byte) *pluginsdk.WebhookResponse {
 }
 
 // sessionModelEntry mirrors one element of `tokscale models --json --group-by
-// session,model` output (tokscale 4.9.x). Only the fields used are declared.
+// session,model` output (tokscale 4.15.x). Only the fields used are declared.
 type sessionModelEntry struct {
 	SessionID    string  `json:"sessionId"`
 	Model        string  `json:"model"`
