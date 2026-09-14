@@ -1,6 +1,6 @@
 id: "kandev-session-cost"
 api_version: 1
-version: "0.3.0"
+version: "0.4.0"
 display_name: "Session Cost"
 description: "Adds a cost icon to the chat bar with pinnable spend details and explicit refresh — resolved from the agent transcript by the tokscale CLI."
 author: "kandev"
@@ -20,7 +20,27 @@ runtime:
 # kandev session id to its agent/ACP transcript id (Host data API). The UI
 # only ever sends kandev ids; the transcript join happens server-side.
 capabilities:
-  api_read: ["sessions"]
+  api_read: ["sessions", "tasks", "session_usage"]
+  api_write: ["session_usage"]
+  state: true
+
+actions:
+  - key: "session-usage"
+    scope: "task"
+    access: "authenticated"
+    max_body_bytes: 4096
+  - key: "historical-import-start"
+    scope: "workspace"
+    access: "authenticated"
+    max_body_bytes: 1024
+  - key: "historical-import-status"
+    scope: "workspace"
+    access: "authenticated"
+    max_body_bytes: 1024
+  - key: "historical-import-cancel"
+    scope: "workspace"
+    access: "authenticated"
+    max_body_bytes: 1024
 
 webhooks:
   - key: "session-cost"
@@ -53,3 +73,14 @@ config_schema:
       title: "High threshold (USD)"
       description: "Session cost at or above this turns the amount red. Default 10."
       default: 10
+    collect_statistics:
+      type: boolean
+      title: "Collect statistics"
+      description: "Periodically save token and cost measurements for the statistics page. Default off."
+      default: false
+    collection_interval_minutes:
+      type: integer
+      minimum: 1
+      title: "Collection interval (minutes)"
+      description: "Minutes between background collection passes. Minimum 1; default 5."
+      default: 5
