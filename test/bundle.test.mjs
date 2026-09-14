@@ -166,6 +166,7 @@ function createReactHarness() {
 function createActionHarness() {
   let definition;
   let Action;
+  let Settings;
   const requests = [];
   const react = createReactHarness();
   const document = createDocument();
@@ -209,6 +210,7 @@ function createActionHarness() {
     {
       registerComponent(slot, component) {
         if (slot === "chat-input-actions") Action = component;
+        if (slot === "plugin-settings") Settings = component;
       },
     },
     host,
@@ -243,6 +245,9 @@ function createActionHarness() {
     tooltipContent() {
       return findElement(react.tree(), (node) => node.type === "TooltipContent");
     },
+    settings() {
+      return Settings;
+    },
     refresh() {
       return findElement(
         react.tree(),
@@ -254,6 +259,12 @@ function createActionHarness() {
     },
   };
 }
+
+test("registers an owner-scoped settings component for historical import", () => {
+  const view = createActionHarness();
+
+  assert.equal(typeof view.settings(), "function");
+});
 
 test("first tap pins details open and starts one initial request", () => {
   const view = createActionHarness();
