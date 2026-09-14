@@ -232,6 +232,7 @@ function createActionHarness(options = {}) {
   let definition;
   let Action;
   let translations = {};
+  let Settings;
   const requests = [];
   const react = createReactHarness();
   const document = createDocument();
@@ -305,6 +306,7 @@ function createActionHarness(options = {}) {
     {
       registerComponent(slot, component) {
         if (slot === "chat-input-actions") Action = component;
+        if (slot === "plugin-settings") Settings = component;
       },
       registerTranslations(nextTranslations) {
         translations = nextTranslations;
@@ -352,6 +354,9 @@ function createActionHarness(options = {}) {
     },
     tooltipContent() {
       return findElement(react.tree(), (node) => node.type === "TooltipContent");
+    },
+    settings() {
+      return Settings;
     },
     refresh() {
       return findElement(
@@ -447,6 +452,12 @@ test("new Action forwards the existing disclosure handlers and closes outside or
   view.document.dispatchEvent({ type: "keydown", key: "Escape" });
   assert.equal(view.tooltip().props.open, false);
   assert.equal(view.requests.length, 2, "closing aborts the obsolete request before a new open");
+});
+
+test("registers an owner-scoped settings component for historical import", () => {
+  const view = createActionHarness();
+
+  assert.equal(typeof view.settings(), "function");
 });
 
 test("first tap pins details open and starts one initial request", () => {
