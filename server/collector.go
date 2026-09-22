@@ -307,7 +307,12 @@ func (p *plugin) saveCollectorCheckpoint(ctx context.Context, host pluginsdk.Hos
 
 func listCollectorSessions(ctx context.Context, reader pluginsdk.SessionReader, since string, initialized bool, pending map[string]collectorPending) ([]pluginsdk.Session, error) {
 	byID := make(map[string]pluginsdk.Session)
-	active, err := listAllSessionsWithFilter(ctx, reader, pluginsdk.SessionFilter{States: []string{"CREATED", "STARTING", "RUNNING", "IDLE", "WAITING_FOR_INPUT"}})
+	activeFilter := pluginsdk.SessionFilter{States: []string{"CREATED", "STARTING", "RUNNING", "IDLE", "WAITING_FOR_INPUT"}}
+	if initialized && since != "" {
+		activeSince := since
+		activeFilter.UpdatedSince = &activeSince
+	}
+	active, err := listAllSessionsWithFilter(ctx, reader, activeFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -329,11 +334,14 @@ func listCollectorSessions(ctx context.Context, reader pluginsdk.SessionReader, 
 		ids = append(ids, id)
 	}
 	if len(ids) > 0 {
-		terminal, err := listAllSessionsWithFilter(ctx, reader, pluginsdk.SessionFilter{SessionIDs: ids, States: []string{"COMPLETED", "FAILED", "CANCELLED"}})
+		pendingSessions, err := listAllSessionsWithFilter(ctx, reader, pluginsdk.SessionFilter{
+			SessionIDs: ids,
+			States:     []string{"CREATED", "STARTING", "RUNNING", "IDLE", "WAITING_FOR_INPUT", "COMPLETED", "FAILED", "CANCELLED"},
+		})
 		if err != nil {
 			return nil, err
 		}
-		for _, session := range terminal {
+		for _, session := range pendingSessions {
 			byID[session.ID] = session
 		}
 	}
