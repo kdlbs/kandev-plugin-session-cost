@@ -11,10 +11,13 @@ type reportCoordinator struct {
 }
 
 type reportCall struct {
-	done    chan struct{}
-	scope   string
-	entries []sessionModelEntry
-	err     error
+	done     chan struct{}
+	scope    string
+	entries  []sessionModelEntry
+	err      error
+	cancel   context.CancelFunc
+	waiters  int
+	finished bool
 }
 
 func newReportCoordinator() *reportCoordinator {
@@ -34,33 +37,55 @@ func (c *reportCoordinator) runScoped(ctx context.Context, cmd resolvedCommand, 
 	for {
 		c.mu.Lock()
 		if c.inFlight == nil {
-			call := &reportCall{done: make(chan struct{}), scope: scope}
+			runCtx, cancel := context.WithTimeout(context.Background(), reportTimeout)
+			call := &reportCall{done: make(chan struct{}), scope: scope, cancel: cancel, waiters: 1}
 			c.inFlight = call
 			c.mu.Unlock()
-			// The command is shared by all waiters. Do not give it the first
-			// webhook/action request context: a disconnected waiter must not
-			// cancel a report that another caller is using. The coordinator still
-			// bounds the subprocess independently of every request.
-			runCtx, cancel := context.WithTimeout(context.Background(), reportTimeout)
-			call.entries, call.err = runSessionModels(runCtx, cmd, runner, extraArgs...)
-			cancel()
-			c.mu.Lock()
-			c.inFlight = nil
-			close(call.done)
-			c.mu.Unlock()
-			return call.entries, call.err
+			go c.execute(call, runCtx, cmd, runner, extraArgs...)
+			return c.wait(ctx, call)
 		}
 		call := c.inFlight
+		if call.scope == scope {
+			call.waiters++
+			c.mu.Unlock()
+			return c.wait(ctx, call)
+		}
 		c.mu.Unlock()
 		select {
 		case <-call.done:
-			if call.scope == scope {
-				return call.entries, call.err
-			}
 			// A different scope finished. Loop so this caller starts its
 			// own report while preserving the one-process invariant.
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+}
+
+func (c *reportCoordinator) execute(call *reportCall, runCtx context.Context, cmd resolvedCommand, runner runner, extraArgs ...string) {
+	call.entries, call.err = runSessionModels(runCtx, cmd, runner, extraArgs...)
+	call.cancel()
+	c.mu.Lock()
+	call.finished = true
+	if c.inFlight == call {
+		c.inFlight = nil
+	}
+	close(call.done)
+	c.mu.Unlock()
+}
+
+func (c *reportCoordinator) wait(ctx context.Context, call *reportCall) ([]sessionModelEntry, error) {
+	select {
+	case <-call.done:
+		return call.entries, call.err
+	case <-ctx.Done():
+		c.mu.Lock()
+		if call.waiters > 0 {
+			call.waiters--
+		}
+		if call.waiters == 0 && !call.finished {
+			call.cancel()
+		}
+		c.mu.Unlock()
+		return nil, ctx.Err()
 	}
 }

@@ -23,23 +23,25 @@ const (
 	importStatusFailed     = "failed"
 	importStatusCancelled  = "cancelled"
 	importStatusDisabled   = "disabled"
+	maxMissingSessionIDs   = 100
 )
 
 // historicalImportState is deliberately small. The session cursor is the
 // resumable boundary; accepted measurements are idempotent at the Host usage
 // service, so a process restart can safely replay the current page.
 type historicalImportState struct {
-	WorkspaceID      string   `json:"workspace_id"`
-	Status           string   `json:"status"`
-	Cursor           string   `json:"cursor,omitempty"`
-	Processed        int      `json:"processed"`
-	Missing          int      `json:"missing"`
-	LastError        string   `json:"last_error,omitempty"`
-	StartedAt        string   `json:"started_at,omitempty"`
-	FinishedAt       string   `json:"finished_at,omitempty"`
-	LastSuccessfulAt string   `json:"last_successful_at,omitempty"`
-	Undated          bool     `json:"undated"`
-	Dates            []string `json:"pending_dates,omitempty"`
+	WorkspaceID       string   `json:"workspace_id"`
+	Status            string   `json:"status"`
+	Cursor            string   `json:"cursor,omitempty"`
+	Processed         int      `json:"processed"`
+	Missing           int      `json:"missing"`
+	MissingSessionIDs []string `json:"missing_session_ids,omitempty"`
+	LastError         string   `json:"last_error,omitempty"`
+	StartedAt         string   `json:"started_at,omitempty"`
+	FinishedAt        string   `json:"finished_at,omitempty"`
+	LastSuccessfulAt  string   `json:"last_successful_at,omitempty"`
+	Undated           bool     `json:"undated"`
+	Dates             []string `json:"pending_dates,omitempty"`
 }
 
 func (p *plugin) handleHistoricalImportAction(ctx context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
@@ -184,7 +186,7 @@ func (p *plugin) runHistoricalImport(ctx context.Context, workspaceID string) {
 			if session.ACPSessionID != "" {
 				eligible = append(eligible, session)
 			} else {
-				state.Missing++
+				markMissingSession(&state, session.ID)
 			}
 		}
 		if len(eligible) > 0 {
@@ -206,13 +208,14 @@ func (p *plugin) runHistoricalImport(ctx context.Context, workspaceID string) {
 					p.finishHistoricalImport(workspaceID, importStatusFailed, reportErr)
 					return
 				}
+				missingSessions := make(map[string]bool)
 				for _, session := range eligible {
 					if !containsDate(historicalSessionDates(session, p.now()), date) {
 						continue
 					}
 					response := responseForEntries(session.ID, session.ACPSessionID, entries, warn, high, p.now())
 					if !response.Found {
-						state.Missing++
+						missingSessions[session.ID] = true
 						continue
 					}
 					if err := p.persistSessionUsageWithCoverage(ctx, workspaceID, session.TaskID, session.ID, &response, usageCoverage{Date: date, Timezone: sourceTimezone()}); err != nil {
@@ -220,6 +223,9 @@ func (p *plugin) runHistoricalImport(ctx context.Context, workspaceID string) {
 						return
 					}
 					state.Undated = false
+				}
+				for sessionID := range missingSessions {
+					markMissingSession(&state, sessionID)
 				}
 				state.Dates = state.Dates[1:]
 				state.LastSuccessfulAt = p.now().UTC().Format(time.RFC3339Nano)
@@ -264,6 +270,21 @@ func (p *plugin) runHistoricalImport(ctx context.Context, workspaceID string) {
 	}
 }
 
+func markMissingSession(state *historicalImportState, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	for _, existing := range state.MissingSessionIDs {
+		if existing == sessionID {
+			return
+		}
+	}
+	state.Missing++
+	if len(state.MissingSessionIDs) < maxMissingSessionIDs {
+		state.MissingSessionIDs = append(state.MissingSessionIDs, sessionID)
+	}
+}
+
 func historicalImportDates(sessions []pluginsdk.Session, now time.Time) []string {
 	seen := make(map[string]struct{})
 	for _, session := range sessions {
@@ -302,8 +323,8 @@ func historicalSessionDates(session pluginsdk.Session, now time.Time) []string {
 	day := time.Date(startLocal.Year(), startLocal.Month(), startLocal.Day(), 0, 0, 0, 0, location)
 	endLocal := end.In(location)
 	last := time.Date(endLocal.Year(), endLocal.Month(), endLocal.Day(), 0, 0, 0, 0, location)
-	dates := make([]string, 0, 32)
-	for !day.After(last) && len(dates) < 366 {
+	dates := make([]string, 0)
+	for !day.After(last) {
 		dates = append(dates, day.Format("2006-01-02"))
 		day = day.AddDate(0, 0, 1)
 	}
