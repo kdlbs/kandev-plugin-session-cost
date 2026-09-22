@@ -33,8 +33,8 @@ manifest's `config_schema`:
   detail surface open without recalculating.
 - **Pinnable details**: the headline amount (colour-coded by spend tier),
   **cost / turn**, token totals (input / output / cache read), and a per-model
-  breakdown showing each model's cost plus its input / output / cache-read
-  counts. Tap the trigger again, tap outside, or press Escape to close.
+  breakdown showing each model's cost plus its input / output / cache-read /
+  cache-write / reasoning counts. Tap the trigger again, tap outside, or press Escape to close.
 - **Explicit refresh**: only pinned details show Refresh. It recalculates the
   active session once, remains open while loading, and ignores repeated input
   until the request finishes.
@@ -42,11 +42,20 @@ manifest's `config_schema`:
   tier colour.
 - Reads spend from tokscale, keyed on the agent transcript id. The backend
   resolves the composer's kandev session id to its ACP transcript id via the
-  Host data API (`api_read: ["sessions"]`) — the UI only ever sends kandev ids.
+  Host data API (`api_read: ["sessions", "tasks", "session_usage"]`, `api_write: ["session_usage"]`, and `state`) — the UI only ever sends kandev ids.
 - **Cost per turn is computed server-side**: tokscale reports the session's
   message (turn) count, and the backend returns `cost / turns`.
 - When tokscale is unavailable the popover explains how to fix it instead of
   erroring.
+- Optional collection saves source-aware token and cost measurements for
+  Kandev's native Token Usage statistics page. Collection is off by default;
+  when enabled, the default interval is five minutes and the minimum is one
+  minute. Saved measurements remain available after the plugin restarts or is
+  disabled.
+- The Session Cost settings card includes an explicit historical import action.
+  It resumes by workspace after a restart, reports missing transcript coverage,
+  and stores each bounded source-local day as a dated usage bucket. Lifetime
+  values remain undated when no source date is available.
 
 ## Settings
 
@@ -56,17 +65,28 @@ Settings → Plugins → Session Cost (generated from the manifest `config_schem
   auto-detects (`tokscale` on PATH, else pinned `npx -y tokscale@4.15.1`).
 - `warn_threshold` (USD, default 1) — amount turns **amber** at or above this.
 - `high_threshold` (USD, default 10) — amount turns **red** at or above this.
+- `collect_statistics` (default false) — enable background token-cost
+  collection for the native Token Usage page.
+- `collection_interval_minutes` (default 5, minimum 1) — interval for
+  background collection when enabled.
+
+Historical import is available in the same owner-scoped settings card after
+collection is enabled. It is explicit because a full local transcript scan can
+be expensive. The import queries one bounded source-local day at a time and
+stores dated usage buckets. It does not assign a lifetime total to an arbitrary
+collection date.
 
 ## Layout
 
 - `manifest.yaml` — one GET webhook (`session-cost`), the UI bundle, the
-  `api_read: ["sessions"]` capability, and the `config_schema`.
+  `api_read: ["sessions", "tasks", "session_usage"]`, `api_write: ["session_usage"]`, and `state` capabilities, plus the `config_schema`.
 - `server/` — Go backend half (`pluginsdk.Plugin`), spawned by kandev over the
   gRPC plugin contract. Maps kandev session id → ACP transcript id, runs
   tokscale grouped by session, and computes cost-per-turn. A failed tokscale
   run degrades to an install-status payload rather than a 500.
 - `ui/bundle.js` — hand-written, no-build ES module using the shared host React
-  instance and `host.ui` components. It only renders the backend payload.
+  instance and `host.ui` components. It renders the toolbar payload and the
+  owner-scoped historical import settings card.
 
 ## Build & install
 
@@ -82,7 +102,7 @@ make package        # tarball for all 5 supported platforms
 Install the tarball via Settings → Plugins → Install plugin (upload), or:
 
 ```sh
-curl -F package=@kandev-session-cost-0.3.0.tar.gz http://localhost:8080/api/plugins/install
+curl -F package=@kandev-session-cost-0.4.0.tar.gz http://localhost:8080/api/plugins/install
 ```
 
 ## CI and releases
