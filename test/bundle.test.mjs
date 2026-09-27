@@ -163,15 +163,17 @@ function createReactHarness() {
   };
 }
 
-function createActionHarness() {
+function createActionHarness(options = {}) {
   let definition;
   let Action;
+  let translations = {};
   const requests = [];
   const react = createReactHarness();
   const document = createDocument();
   const ui = Object.fromEntries(
     ["Button", "Spinner", "Tooltip", "TooltipTrigger", "TooltipContent"].map((name) => [name, name]),
   );
+  if (options.action) ui.Action = function Action() {};
   const sandbox = {
     window: {
       registerKandevPlugin(_id, nextDefinition) {
@@ -192,6 +194,28 @@ function createActionHarness() {
     React: react.React,
     jsx: element,
     ui,
+    ...(options.locale
+      ? {
+          i18n: {
+            useTranslation() {
+              return {
+                t(key, translationOptions = {}) {
+                  const count = translationOptions.count;
+                  const pluralKey = count === undefined ? key : `${key}_${count === 1 ? "one" : "other"}`;
+                  const message =
+                    translations[options.locale]?.[pluralKey] ??
+                    translations[options.locale]?.[key] ??
+                    translations.en?.[pluralKey] ??
+                    translationOptions.defaultValue ??
+                    key;
+                  const values = { ...(translationOptions.values || {}), ...(count === undefined ? {} : { count }) };
+                  return message.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (_match, name) => String(values[name] ?? ""));
+                },
+              };
+            },
+          },
+        }
+      : {}),
     api: {
       fetch(url) {
         let resolve;
@@ -210,17 +234,28 @@ function createActionHarness() {
       registerComponent(slot, component) {
         if (slot === "chat-input-actions") Action = component;
       },
+      registerTranslations(nextTranslations) {
+        translations = nextTranslations;
+      },
     },
     host,
   );
 
   react.mount(Action, {
-    slotProps: { taskId: "task-1", activeSessionId: "session-1", sessionIds: ["session-1"] },
+    slotProps: {
+      taskId: "task-1",
+      activeSessionId: "session-1",
+      sessionIds: ["session-1"],
+      presentation: options.presentation,
+    },
   });
 
   return {
     requests,
     document,
+    translations() {
+      return translations;
+    },
     rerender(slotProps) {
       react.render({ slotProps });
     },
@@ -235,7 +270,10 @@ function createActionHarness() {
     },
     tree: react.tree,
     trigger() {
-      return findElement(react.tree(), (node) => node.type === "Button" && node.props.id === "session-cost-action");
+      return findElement(
+        react.tree(),
+        (node) => (node.type === "Button" || node.type === ui.Action) && node.props.id === "session-cost-action",
+      );
     },
     tooltip() {
       return findElement(react.tree(), (node) => node.type === "Tooltip");
@@ -246,7 +284,9 @@ function createActionHarness() {
     refresh() {
       return findElement(
         react.tree(),
-        (node) => node.type === "Button" && node.props["aria-label"] === "Refresh session cost",
+        (node) =>
+          node.type === "Button" &&
+          ["Refresh session cost", "Atualizar o custo da sessão"].includes(node.props["aria-label"]),
       );
     },
     busyRegion() {
@@ -254,6 +294,69 @@ function createActionHarness() {
     },
   };
 }
+
+test("new hosts render one localized Action without plugin shell styles", async () => {
+  const view = createActionHarness({ action: true, locale: "pt-pt" });
+  const trigger = view.trigger();
+
+  assert.equal(trigger.type.name, "Action");
+  assert.equal(trigger.props.id, "session-cost-action");
+  assert.equal(trigger.props.label, "Custo da sessão");
+  assert.equal(trigger.props.tooltip, "");
+  assert.ok(trigger.props.icon);
+  assert.equal(trigger.props.text, undefined);
+  assert.equal(typeof trigger.props.ref.current.contains, "function");
+  for (const shellProp of ["className", "style", "size", "variant", "asChild"]) {
+    assert.equal(shellProp in trigger.props, false);
+  }
+  assert.equal(view.translations().en.actionLabel, "Session cost");
+  assert.equal(view.translations()["pt-pt"].actionLabel, "Custo da sessão");
+
+  trigger.props.onMouseEnter();
+  trigger.props.onFocus();
+  trigger.props.onClick();
+  assert.equal(view.requests.length, 1);
+  assert.equal(view.tooltip().props.open, true);
+  assert.equal(view.trigger().props.pressed, true);
+
+  view.requests[0].resolve(costResponse({ cost: 1.25, cost_per_turn: 1.25 }));
+  await flushPromises();
+
+  assert.equal(view.trigger().props.label, "Custo da sessão");
+  assert.equal(view.trigger().props.text, "$1.25");
+  assert.equal(view.trigger().props.tone, "warning");
+  assert.match(view.text(), /1 turno/);
+  assert.match(view.text(), /\$1\.25 \/ turno/);
+  assert.match(view.text(), /Entrada10/);
+  assert.equal(view.refresh().props["aria-label"], "Atualizar o custo da sessão");
+});
+
+test("older-host mobile fallback keeps a touch-sized legacy button", () => {
+  const view = createActionHarness({ presentation: "mobile" });
+  const trigger = view.trigger();
+
+  assert.equal(trigger.type, "Button");
+  assert.equal(trigger.props.variant, "ghost");
+  assert.match(trigger.props.className, /min-h-11/);
+  assert.match(trigger.props.className, /min-w-11/);
+  assert.match(trigger.props.className, /\[@media\(pointer:coarse\)\]:h-11/);
+  assert.match(trigger.props.className, /\[@media\(pointer:coarse\)\]:w-11/);
+});
+
+test("new Action forwards the existing disclosure handlers and closes outside or on Escape", () => {
+  const view = createActionHarness({ action: true });
+  const trigger = view.trigger();
+
+  trigger.props.onClick();
+  assert.equal(view.tooltip().props.open, true);
+  view.document.dispatchEvent({ type: "pointerdown", target: new FakeElement() });
+  assert.equal(view.tooltip().props.open, false);
+
+  view.trigger().props.onClick();
+  view.document.dispatchEvent({ type: "keydown", key: "Escape" });
+  assert.equal(view.tooltip().props.open, false);
+  assert.equal(view.requests.length, 1);
+});
 
 test("first tap pins details open and starts one initial request", () => {
   const view = createActionHarness();
