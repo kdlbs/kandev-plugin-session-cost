@@ -497,6 +497,7 @@ function makeSessionCostAction(host) {
 
     var loaded = !visibleState.loading && !visibleState.error ? visibleState.data : null;
     var iconColor = loaded && loaded.found ? tierColor(loaded.cost, loaded.warn_threshold, loaded.high_threshold) : undefined;
+    var hasInlineCost = loaded && loaded.found && !(loaded.tokscale && loaded.tokscale.installed === false);
 
     function onTriggerClick() {
       pinnedRef.current = stateMatchesActive ? !pinnedRef.current : true;
@@ -538,7 +539,8 @@ function makeSessionCostAction(host) {
               className:
                 (loaded && loaded.found ? "h-7 px-1.5 " : "h-7 w-7 ") +
                 (ctx.presentation === "mobile" ? "min-h-11 min-w-11 " : "") +
-                "[@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 " +
+                "[@media(pointer:coarse)]:h-11 " +
+                (hasInlineCost ? "" : "[@media(pointer:coarse)]:w-11 ") +
                 "cursor-pointer text-muted-foreground hover:text-foreground hover:bg-primary/10",
               "aria-label": actionLabel,
               "aria-expanded": visibleOpen,

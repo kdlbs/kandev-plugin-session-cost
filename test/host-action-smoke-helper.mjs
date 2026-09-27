@@ -31,13 +31,13 @@ export async function runSessionCostHostSmoke({
 
     const fakeResponse = {
       found: true,
-      cost: 2.5,
+      cost: 123456789.12,
       cost_per_turn: 1.25,
       turns: 2,
       input: 1200,
       output: 340,
       cache_read: 50,
-      models: [{ model: "fixture-model", cost: 2.5, input: 1200, output: 340, cache_read: 50 }],
+      models: [{ model: "fixture-model", cost: 123456789.12, input: 1200, output: 340, cache_read: 50 }],
       tokscale: { installed: true },
       acp_session_id: "fixture-acp-session",
     };
@@ -56,6 +56,43 @@ export async function runSessionCostHostSmoke({
       await expect(dialog.getByTestId("quick-chat-messages")).toBeVisible();
       await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
       return dialog;
+    };
+
+    const expectLegacyCoarseLayout = async (button) => {
+      const layout = await button.evaluate((buttonElement) => {
+        const toolbar = buttonElement.closest('[data-testid="mobile-chat-input-toolbar"]');
+        const icon = buttonElement.querySelector("svg");
+        const amount = Array.from(buttonElement.querySelectorAll("span")).find((element) =>
+          element.textContent.includes("123"),
+        );
+        const rect = (element) => {
+          const bounds = element.getBoundingClientRect();
+          return { top: bounds.top, right: bounds.right, bottom: bounds.bottom, left: bounds.left };
+        };
+        const contains = (parent, child) =>
+          child.top >= parent.top - 1 &&
+          child.right <= parent.right + 1 &&
+          child.bottom <= parent.bottom + 1 &&
+          child.left >= parent.left - 1;
+        const buttonBounds = rect(buttonElement);
+        const iconBounds = icon && rect(icon);
+        const amountBounds = amount && rect(amount);
+        const toolbarBounds = toolbar && rect(toolbar);
+
+        return {
+          toolbarFound: Boolean(toolbar),
+          iconInsideButton: Boolean(iconBounds && contains(buttonBounds, iconBounds)),
+          amountInsideButton: Boolean(amountBounds && contains(buttonBounds, amountBounds)),
+          buttonInsideToolbar: Boolean(toolbarBounds && contains(toolbarBounds, buttonBounds)),
+          buttonWidth: buttonBounds.right - buttonBounds.left,
+        };
+      });
+
+      expect(layout.toolbarFound).toBe(true);
+      expect(layout.iconInsideButton).toBe(true);
+      expect(layout.amountInsideButton).toBe(true);
+      expect(layout.buttonInsideToolbar).toBe(true);
+      expect(layout.buttonWidth).toBeGreaterThanOrEqual(44);
     };
 
     const dialog = await openQuickChat();
@@ -84,8 +121,9 @@ export async function runSessionCostHostSmoke({
     await expect.poll(() => requests.length, { timeout: 10_000 }).toBe(1);
     expect(requests[0].taskId).toBe(quickChat.task_id);
     expect(requests[0].active).toBe(quickChat.session_id);
-    await expect(action).toContainText("$2.50");
+    await expect(action).toContainText(/123.*456.*789/);
     await expect(action).toHaveAttribute("aria-label", "Session cost");
+    if (touch && !expectAction) await expectLegacyCoarseLayout(action);
 
     if (!touch) await action.press("Enter");
     await expect(action).toHaveAttribute("aria-expanded", "true");
@@ -144,6 +182,8 @@ export async function runSessionCostHostSmoke({
     await expect.poll(() => requests.length, { timeout: 10_000 }).toBe(3);
     expect(requests[2].taskId).toBe(quickChat.task_id);
     expect(requests[2].active).toBe(quickChat.session_id);
+    await expect(taskChatAction).toContainText(/123.*456.*789/);
+    if (touch && !expectAction) await expectLegacyCoarseLayout(taskChatAction);
   } finally {
     if (installed) await apiClient.rawRequest("DELETE", "/api/plugins/kandev-session-cost").catch(() => undefined);
     if (quickChat?.task_id) await apiClient.deleteTask(quickChat.task_id).catch(() => undefined);

@@ -331,7 +331,7 @@ test("new hosts render one localized Action without plugin shell styles", async 
   assert.equal(view.refresh().props["aria-label"], "Atualizar o custo da sessão");
 });
 
-test("older-host mobile fallback keeps a touch-sized legacy button", () => {
+test("older-host mobile fallback keeps a touch target and lets loaded cost content set its width", async () => {
   const view = createActionHarness({ presentation: "mobile" });
   const trigger = view.trigger();
 
@@ -341,6 +341,16 @@ test("older-host mobile fallback keeps a touch-sized legacy button", () => {
   assert.match(trigger.props.className, /min-w-11/);
   assert.match(trigger.props.className, /\[@media\(pointer:coarse\)\]:h-11/);
   assert.match(trigger.props.className, /\[@media\(pointer:coarse\)\]:w-11/);
+
+  trigger.props.onFocus();
+  view.requests[0].resolve(costResponse({ cost: 123456789.12, cost_per_turn: 1.25 }));
+  await flushPromises();
+
+  const loadedTrigger = view.trigger();
+  assert.equal(loadedTrigger.props.size, "sm");
+  assert.match(loadedTrigger.props.className, /px-1\.5/);
+  assert.doesNotMatch(loadedTrigger.props.className, /\[@media\(pointer:coarse\)\]:w-11/);
+  assert.match(view.text(), /123,456,789\.12/);
 });
 
 test("new Action forwards the existing disclosure handlers and closes outside or on Escape", () => {
