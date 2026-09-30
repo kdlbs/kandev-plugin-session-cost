@@ -277,7 +277,11 @@ jobs:
 
       - name: Extract package checksums
         working-directory: plugin
-        run: tar -xzf "$(make -s package-file)" checksums.txt
+        run: |
+          set -euo pipefail
+          package_file="$(make -s package-file)"
+          tar -xzf "$package_file" checksums.txt
+          sha256sum "$package_file" >> checksums.txt
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2

@@ -79,7 +79,7 @@ Plugins → Install plugin**. You can also install the local package through the
 plugin API:
 
 ```sh
-curl -F package=@kandev-session-cost-0.3.0.tar.gz http://localhost:8080/api/plugins/install
+curl -F package=@kandev-session-cost-0.3.1.tar.gz http://localhost:8080/api/plugins/install
 ```
 
 ## Develop and verify
@@ -139,7 +139,7 @@ archive through the host UI and use fake cost data:
 ```sh
 (cd "$HOST_ROOT/apps/web" && \
   NODE_OPTIONS='--import=tsx' \
-  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.3.0.tar.gz" \
+  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.3.1.tar.gz" \
   SESSION_COST_EXPECT_ACTION=1 \
   pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs")
 ```
