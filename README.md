@@ -1,94 +1,169 @@
-# kandev-session-cost
+# Session Cost
 
-A [kandev](https://github.com/kdlbs/kandev) plugin that adds a **cost icon to
-the chat bar** showing the spend of the current session — total cost,
-**cost-per-turn**, and a per-model breakdown — parsed from your local agent CLI
-transcript by the [tokscale](https://github.com/junhoyeo/tokscale) CLI.
-
-The amount is colour-coded by how much you've spent (green → amber → red). Hover
-or focus previews the details, while click or tap pins them open and exposes an
-explicit Refresh action. Once loaded, the cost stays next to the icon so the bar
-always "says the cost".
+A [Kandev](https://github.com/kdlbs/kandev) plugin that shows the current
+session's spend, cost per turn, and per-model usage in the chat composer. The
+backend reads the local agent transcript through the [tokscale](https://github.com/junhoyeo/tokscale)
+CLI.
 
 ## Screenshots
 
-The current session's spend on hover — colour-coded total, cost-per-turn, token
-totals, and a per-model breakdown:
+Session cost details on hover or focus, with the total, cost per turn, token
+totals, and per-model breakdown:
 
-![Session cost popover](https://raw.githubusercontent.com/kdlbs/kandev-plugin-session-cost/f4c484a3f3f5d84e80baa8950732c98c76ed954a/session-cost-popover.png)
+![Session cost details](https://raw.githubusercontent.com/kdlbs/kandev-plugin-session-cost/f4c484a3f3f5d84e80baa8950732c98c76ed954a/session-cost-popover.png)
 
-The cost pill lives in the chat composer toolbar, beside the model picker:
+The action appears in the chat composer toolbar:
 
-![Cost pill in the chat bar](https://raw.githubusercontent.com/kdlbs/kandev-plugin-session-cost/f4c484a3f3f5d84e80baa8950732c98c76ed954a/session-cost-toolbar.png)
+![Session cost action in the chat bar](https://raw.githubusercontent.com/kdlbs/kandev-plugin-session-cost/f4c484a3f3f5d84e80baa8950732c98c76ed954a/session-cost-toolbar.png)
 
-Operator settings (**Settings → Plugins → Session Cost**), generated from the
-manifest's `config_schema`:
+Settings are generated from `manifest.yaml`:
 
-![Settings page](https://raw.githubusercontent.com/kdlbs/kandev-plugin-session-cost/f4c484a3f3f5d84e80baa8950732c98c76ed954a/session-cost-settings.png)
+![Session Cost settings](https://raw.githubusercontent.com/kdlbs/kandev-plugin-session-cost/f4c484a3f3f5d84e80baa8950732c98c76ed954a/session-cost-settings.png)
 
-## What it does
+## Behavior
 
-- A coins button in the chat composer toolbar (`chat-input-actions` slot,
-  desktop + mobile). Hover or focus previews details; click or tap pins the same
-  detail surface open without recalculating.
-- **Pinnable details**: the headline amount (colour-coded by spend tier),
-  **cost / turn**, token totals (input / output / cache read), and a per-model
-  breakdown showing each model's cost plus its input / output / cache-read
-  counts. Tap the trigger again, tap outside, or press Escape to close.
-- **Explicit refresh**: only pinned details show Refresh. It recalculates the
-  active session once, remains open while loading, and ignores repeated input
-  until the request finishes.
-- **Inline amount**: once loaded, the total is shown next to the icon in the
-  tier colour.
-- Reads spend from tokscale, keyed on the agent transcript id. The backend
-  resolves the composer's kandev session id to its ACP transcript id via the
-  Host data API (`api_read: ["sessions"]`) — the UI only ever sends kandev ids.
-- **Cost per turn is computed server-side**: tokscale reports the session's
-  message (turn) count, and the backend returns `cost / turns`.
-- When tokscale is unavailable the popover explains how to fix it instead of
-  erroring.
+- The action registers once in `chat-input-actions`. Hover or keyboard focus
+  starts one request for the active session. Click or tap pins the details open.
+- The accessible action label stays “Session cost” when the displayed amount
+  changes. On hosts with `host.ui.Action`, the host owns the action's size,
+  spacing, focus style, and icon box. Hosts without Action use the plugin's
+  existing Button fallback.
+- Pinned details show the total, cost per turn, input/output/cache-read token
+  totals, and per-model costs and token counts. Click or tap the action again,
+  click outside, or press Escape to close them.
+- Refresh is available while details are pinned. It recalculates the active
+  session once and remains disabled until the request finishes.
+- The total changes from green to amber at `warn_threshold` and to red at
+  `high_threshold`.
+- The backend maps the Kandev session ID to the agent transcript ID. The UI
+  sends only Kandev task and session IDs.
+- If tokscale is unavailable, the details explain how to configure its command.
+
+The action label and details are registered with Kandev's plugin translation
+API. English is the fallback; Portuguese (Portugal) is also included.
+
+## Requirements and permissions
+
+The manifest uses plugin API v1 and requests read-only access to Kandev
+sessions (`api_read: ["sessions"]`). It does not request credentials or write
+access. The plugin runs tokscale on the machine hosting the Kandev plugin
+backend, so tokscale must be installed there or available through the configured
+command.
+
+The package contains server binaries for Linux amd64 and arm64, macOS amd64 and
+arm64, and Windows amd64. The UI uses the host's React instance and does not
+bundle a second React runtime.
+
+The Go and frontend SDK source pin is
+`570600439036e81f8e9e1c63f15c4abce8a6c846`, which includes host PR #3943 and
+`host.ui.Action`. This is a source revision, not a Kandev release number. The
+UI detects Action and retains the Button path for older hosts. The manifest
+does not declare a minimum Kandev version; validate the package against the
+stable host release you intend to run before publishing it.
 
 ## Settings
 
-Settings → Plugins → Session Cost (generated from the manifest `config_schema`):
+Open **Settings → Plugins → Session Cost**:
 
-- `command` — explicit tokscale invocation (path or full command); empty
-  auto-detects (`tokscale` on PATH, else pinned `npx -y tokscale@4.15.1`).
-- `warn_threshold` (USD, default 1) — amount turns **amber** at or above this.
-- `high_threshold` (USD, default 10) — amount turns **red** at or above this.
+- `command` sets the tokscale command or path. Empty uses `tokscale` from PATH,
+  then the pinned `npx -y tokscale@4.15.1` fallback.
+- `warn_threshold` is the USD amount at which the displayed total turns amber.
+  Its default is 1.
+- `high_threshold` is the USD amount at which the displayed total turns red.
+  Its default is 10.
 
-## Layout
+## Install
 
-- `manifest.yaml` — one GET webhook (`session-cost`), the UI bundle, the
-  `api_read: ["sessions"]` capability, and the `config_schema`.
-- `server/` — Go backend half (`pluginsdk.Plugin`), spawned by kandev over the
-  gRPC plugin contract. Maps kandev session id → ACP transcript id, runs
-  tokscale grouped by session, and computes cost-per-turn. A failed tokscale
-  run degrades to an install-status payload rather than a 500.
-- `ui/bundle.js` — hand-written, no-build ES module using the shared host React
-  instance and `host.ui` components. It only renders the backend payload.
-
-## Build & install
-
-Requires a kandev monorepo checkout at `../kandev` (see the `replace` directive
-in `go.mod`).
-
-```sh
-make test           # unit tests (no tokscale needed — the runner is injected)
-make package-host   # tarball for this machine only (fast iteration)
-make package        # tarball for all 5 supported platforms
-```
-
-Install the tarball via Settings → Plugins → Install plugin (upload), or:
+Download the package from a GitHub Release and upload it in **Settings →
+Plugins → Install plugin**. You can also install the local package through the
+plugin API:
 
 ```sh
 curl -F package=@kandev-session-cost-0.3.1.tar.gz http://localhost:8080/api/plugins/install
 ```
 
+## Develop and verify
+
+Use Go 1.26 and Node.js 24. The Go module resolves the unpublished Kandev SDK
+from a sibling checkout at `../kandev/apps/backend`. Create a private checkout
+for this plugin worktree and pin it to the source revision above:
+
+```sh
+git clone --filter=blob:none https://github.com/kdlbs/kandev.git ../kandev
+git -C ../kandev checkout --detach 570600439036e81f8e9e1c63f15c4abce8a6c846
+```
+
+Do not point the module replacement at a floating branch. The host checkout is
+outside the plugin tree and can be shared by Go builds, package checks, and the
+disposable host smoke test.
+
+Run the local checks from the plugin root:
+
+```sh
+make check-format
+go mod tidy
+git diff --exit-code -- go.mod go.sum
+make vet
+make test
+make build
+make package-host
+make package
+make verify-package-host
+make verify-package
+```
+
+`make test` runs the Go suite, UI bundle behavior tests, JavaScript syntax
+check, and negative package/release verifier tests. `make verify-package-host`
+checks the package for the current machine. `make verify-package` builds and
+checks all five declared platforms, the UI bundle, manifest identity, exact
+file inventory, and checksums. `make package-host` and `make package` create
+the corresponding archives without the additional verification step.
+
+The UI has no build step or npm dependencies. The UI tests use fake webhook
+data. They do not run tokscale or read a real agent database.
+
+## Packaged browser smoke test
+
+Build the disposable Kandev host and its E2E fixture package:
+
+```sh
+PLUGIN_ROOT=$PWD
+HOST_ROOT=$PLUGIN_ROOT/../kandev
+(cd "$HOST_ROOT" && make build-backend build-web-e2e build-e2e-plugin-package)
+(cd "$HOST_ROOT/apps" && pnpm install --frozen-lockfile)
+```
+
+Run both desktop and phone checks against the package. The tests install the
+archive through the host UI and use fake cost data:
+
+```sh
+(cd "$HOST_ROOT/apps/web" && \
+  NODE_OPTIONS='--import=tsx' \
+  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.3.1.tar.gz" \
+  SESSION_COST_EXPECT_ACTION=1 \
+  pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs")
+```
+
+For an older host checkout, set `KANDEV_HOST_ROOT` to its path and set
+`SESSION_COST_EXPECT_ACTION=0`. Build that host with the same commands first.
+The checked fallback reference is Kandev `v0.86.0`.
+
 ## CI and releases
 
-Pull requests run CI for module tidiness, formatting, vetting, and tests, plus
-a separate host-build and five-platform package check. Pushing a `v*` tag that
-matches `manifest.yaml`'s version repeats verification, packages the plugin,
-extracts its internal `checksums.txt`, and publishes both the tarball and that
-checksum file in a GitHub Release.
+Pull requests check module tidiness, Go formatting, vet, Go and UI tests, and
+both host-only and full platform packages. CI, package builds, and releases
+read the same immutable SDK source pin from `.kandev-sdk-ref`. Node is set up
+explicitly for the UI tests.
+
+Release automation runs from `main`. Select a patch, minor, or major bump, then
+use its dry run before a release. The workflow builds and validates the proposed
+version before it pushes release metadata or a tag. A pushed tag must match the
+manifest, Makefile, and packaged manifest before the workflow publishes a
+GitHub Release with the archive and `checksums.txt`.
+
+Wait for a stable Kandev release that includes PR #3943. Validate the package
+against that release before you publish it.
+
+## License
+
+See [LICENSE](LICENSE).
