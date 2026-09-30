@@ -184,9 +184,11 @@ jobs:
         working-directory: plugin
         run: make package
 
-      - name: Extract checksums
+      - name: Generate release checksums
         working-directory: plugin
-        run: tar -xzf kandev-session-cost-*.tar.gz checksums.txt
+        run: |
+          tar -xzf kandev-session-cost-*.tar.gz checksums.txt
+          sha256sum kandev-session-cost-*.tar.gz >> checksums.txt
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
