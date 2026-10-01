@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -19,12 +20,35 @@ type fakeHost struct {
 	pluginsdk.UnimplementedHostData
 	config   map[string]any
 	sessions []pluginsdk.Session
+	stateMu  sync.Mutex
+	state    map[string]map[string]any
 }
 
-func (h *fakeHost) GetState(context.Context, string, string, string) (map[string]any, bool, error) {
-	return nil, false, nil
+func (h *fakeHost) GetState(_ context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
+	h.stateMu.Lock()
+	defer h.stateMu.Unlock()
+	value, found := h.state[scope+"\x00"+scopeID+"\x00"+key]
+	if !found {
+		return nil, false, nil
+	}
+	copy := make(map[string]any, len(value))
+	for name, item := range value {
+		copy[name] = item
+	}
+	return copy, true, nil
 }
-func (h *fakeHost) SetState(context.Context, string, string, string, map[string]any) error {
+
+func (h *fakeHost) SetState(_ context.Context, scope, scopeID, key string, value map[string]any) error {
+	h.stateMu.Lock()
+	defer h.stateMu.Unlock()
+	if h.state == nil {
+		h.state = make(map[string]map[string]any)
+	}
+	copy := make(map[string]any, len(value))
+	for name, item := range value {
+		copy[name] = item
+	}
+	h.state[scope+"\x00"+scopeID+"\x00"+key] = copy
 	return nil
 }
 func (h *fakeHost) DeleteState(context.Context, string, string, string) error { return nil }
