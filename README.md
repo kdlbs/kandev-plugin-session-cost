@@ -33,6 +33,16 @@ Settings are generated from `manifest.yaml`:
   click outside, or press Escape to close them.
 - Refresh is available while details are pinned. It recalculates the active
   session once and remains disabled until the request finishes.
+- The backend uses one report worker for all sessions. A new lookup returns a
+  progress state while tokscale scans transcripts. The backend keeps the last
+  successful report in memory for 30 seconds.
+- While a report runs, details keep the last successful cost and mark it as a
+  previous result. A report or request error shows translated recovery text and
+  a retry action.
+- The browser requests status every two seconds while details stay open. It
+  stops polling after 130 seconds. Each request has a 10-second timeout.
+- The backend stops its report worker and child processes when the plugin stops.
+  It does not start a report when the active session has no ACP transcript.
 - The total changes from green to amber at `warn_threshold` and to red at
   `high_threshold`.
 - The backend maps the Kandev session ID to the agent transcript ID. The UI
@@ -120,8 +130,8 @@ checks all five declared platforms, the UI bundle, manifest identity, exact
 file inventory, and checksums. `make package-host` and `make package` create
 the corresponding archives without the additional verification step.
 
-The UI has no build step or npm dependencies. The UI tests use fake webhook
-data. They do not run tokscale or read a real agent database.
+The UI has no build step or npm dependencies. The UI bundle unit tests use
+mocked fetch responses. They do not run tokscale or read an agent database.
 
 ## Packaged browser smoke test
 
@@ -134,8 +144,11 @@ HOST_ROOT=$PLUGIN_ROOT/../kandev
 (cd "$HOST_ROOT/apps" && pnpm install --frozen-lockfile)
 ```
 
-Run both desktop and phone checks against the package. The tests install the
-archive through the host UI and use fake cost data:
+Run both desktop and phone checks against the package.
+
+The tests install the archive through the host UI. Each test uses a temporary
+tokscale command. The command blocks, returns fixture data, and fails once.
+The browser calls the installed webhook and checks its recovery states.
 
 ```sh
 (cd "$HOST_ROOT/apps/web" && \
