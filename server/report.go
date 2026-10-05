@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 type reportCoordinator struct {
 	mu       sync.Mutex
 	inFlight *reportCall
+	closed   bool
 }
 
 type reportCall struct {
@@ -36,6 +38,10 @@ func (c *reportCoordinator) run(ctx context.Context, cmd resolvedCommand, runner
 func (c *reportCoordinator) runScoped(ctx context.Context, cmd resolvedCommand, scope string, runner runner, extraArgs ...string) ([]sessionModelEntry, error) {
 	for {
 		c.mu.Lock()
+		if c.closed {
+			c.mu.Unlock()
+			return nil, context.Canceled
+		}
 		if c.inFlight == nil {
 			runCtx, cancel := context.WithTimeout(context.Background(), reportTimeout)
 			call := &reportCall{done: make(chan struct{}), scope: scope, cancel: cancel, waiters: 1}
@@ -87,5 +93,26 @@ func (c *reportCoordinator) wait(ctx context.Context, call *reportCall) ([]sessi
 		}
 		c.mu.Unlock()
 		return nil, ctx.Err()
+	}
+}
+
+// Close drains the actual shared subprocess, including collector/import work,
+// before the plugin signal handler exits.
+func (c *reportCoordinator) Close() {
+	c.mu.Lock()
+	c.closed = true
+	call := c.inFlight
+	if call != nil {
+		call.cancel()
+	}
+	c.mu.Unlock()
+	if call == nil {
+		return
+	}
+	timer := time.NewTimer(reportShutdownWait)
+	defer timer.Stop()
+	select {
+	case <-call.done:
+	case <-timer.C:
 	}
 }

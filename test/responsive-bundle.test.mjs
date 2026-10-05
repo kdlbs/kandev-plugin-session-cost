@@ -4,7 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 function bundleSource() {
-  return readFileSync(new URL("../ui/bundle.js", import.meta.url), "utf8");
+  return readFileSync(process.env.SESSION_COST_TEST_BUNDLE_PATH || new URL("../ui/bundle.js", import.meta.url), "utf8");
 }
 
 function element(type, props, ...children) {
@@ -106,15 +106,34 @@ function costResponse(overrides = {}) {
   return {
     found: true,
     cost: 1,
-    turns: 1,
     cost_per_turn: 1,
+    turns: 1,
     input: 10,
     output: 5,
     cache_read: 0,
+    warn_threshold: 1,
+    high_threshold: 10,
     models: [],
     tokscale: { installed: true },
     acp_session_id: "acp-1",
     ...overrides,
+  };
+}
+
+function response(data, options = {}) {
+  const status = options.status ?? 200;
+  const contentType = options.contentType ?? "application/json";
+  return {
+    ok: options.ok ?? (status >= 200 && status < 300),
+    status,
+    headers: {
+      get(name) {
+        return name.toLowerCase() === "content-type" ? contentType : null;
+      },
+    },
+    json() {
+      return options.jsonError ? Promise.reject(options.jsonError) : Promise.resolve(data);
+    },
   };
 }
 
@@ -197,6 +216,15 @@ function createReactHarness() {
     treeBeforeEffects() {
       return treeBeforeEffects;
     },
+    unmount() {
+      for (const hook of hooks) {
+        if (hook && typeof hook.cleanup === "function") {
+          const cleanup = hook.cleanup;
+          hook.cleanup = null;
+          cleanup();
+        }
+      }
+    },
   };
 }
 
@@ -204,7 +232,6 @@ function createActionHarness(options = {}) {
   let definition;
   let Action;
   let translations = {};
-  let Settings;
   const requests = [];
   const react = createReactHarness();
   const document = createDocument();
@@ -220,16 +247,16 @@ function createActionHarness(options = {}) {
       },
     },
     encodeURIComponent,
-    performance: {now: timers.now},
-    AbortController,
-    setTimeout: timers.setTimeout,
-    clearTimeout: timers.clearTimeout,
     document,
     Element: FakeElement,
     isFinite,
     Math,
     Node: FakeNode,
     String,
+    AbortController,
+    performance: { now: timers.now },
+    setTimeout: timers.setTimeout,
+    clearTimeout: timers.clearTimeout,
   };
   vm.runInNewContext(bundleSource(), sandbox);
 
@@ -259,17 +286,17 @@ function createActionHarness(options = {}) {
           },
         }
       : {}),
-    ...(options.context ? { context: options.context } : {}),
     api: {
-      ...(options.invokeAction ? { invokeAction: options.invokeAction } : {}),
-      fetch(url) {
+      fetch(url, init) {
         let resolve;
         let reject;
+        let resolveResponse;
         const promise = new Promise((nextResolve, nextReject) => {
-          resolve = (data) => nextResolve({ ok: true, headers: {get: () => "application/json"}, json: () => Promise.resolve(data) });
+          resolve = (data, responseOptions = {}) => nextResolve(response(data, responseOptions));
+          resolveResponse = (value) => nextResolve(value);
           reject = nextReject;
         });
-        requests.push({ url, resolve, reject });
+        requests.push({ url, signal: init && init.signal, resolve, resolveResponse: (value) => resolveResponse(value), reject });
         return promise;
       },
     },
@@ -278,7 +305,6 @@ function createActionHarness(options = {}) {
     {
       registerComponent(slot, component) {
         if (slot === "chat-input-actions") Action = component;
-        if (slot === "plugin-settings") Settings = component;
       },
       registerTranslations(nextTranslations) {
         translations = nextTranslations;
@@ -287,7 +313,7 @@ function createActionHarness(options = {}) {
     host,
   );
 
-  react.mount(options.settings ? Settings : Action, {
+  react.mount(Action, {
     slotProps: {
       taskId: "task-1",
       activeSessionId: "session-1",
@@ -299,7 +325,6 @@ function createActionHarness(options = {}) {
   return {
     requests,
     document,
-    advanceTime(duration) {timers.advance(duration);},
     translations() {
       return translations;
     },
@@ -328,9 +353,6 @@ function createActionHarness(options = {}) {
     tooltipContent() {
       return findElement(react.tree(), (node) => node.type === "TooltipContent");
     },
-    settings() {
-      return Settings;
-    },
     refresh() {
       return findElement(
         react.tree(),
@@ -341,6 +363,15 @@ function createActionHarness(options = {}) {
     },
     busyRegion() {
       return findElement(react.tree(), (node) => node.props && "aria-busy" in node.props);
+    },
+    advanceTimers(duration) {
+      timers.advance(duration);
+    },
+    pendingTimers() {
+      return timers.size();
+    },
+    unmount() {
+      react.unmount();
     },
   };
 }
@@ -415,13 +446,7 @@ test("new Action forwards the existing disclosure handlers and closes outside or
   view.trigger().props.onClick();
   view.document.dispatchEvent({ type: "keydown", key: "Escape" });
   assert.equal(view.tooltip().props.open, false);
-  assert.equal(view.requests.length, 2);
-});
-
-test("registers an owner-scoped settings component for historical import", () => {
-  const view = createActionHarness();
-
-  assert.equal(typeof view.settings(), "function");
+  assert.equal(view.requests.length, 2, "closing aborts the obsolete request before a new open");
 });
 
 test("first tap pins details open and starts one initial request", () => {
@@ -491,11 +516,11 @@ test("per-model token columns align left, center, and right", async () => {
   assert.match(view.text(), /In 200KOut 11\.7KCache 300K/);
 });
 
-test("second tap closes without loading and reopening rechecks saved usage", async () => {
+test("second tap closes and reopening checks the cached report without forcing refresh", async () => {
   const view = createActionHarness();
 
   view.trigger().props.onClick();
-  view.requests[0].resolve(costResponse({ found: false, cost: 0, turns: 0, input: 0, output: 0 }));
+  view.requests[0].resolve(costResponse({ cost: 1.25, cost_per_turn: 1.25 }));
   await flushPromises();
 
   view.trigger().props.onClick();
@@ -505,6 +530,13 @@ test("second tap closes without loading and reopening rechecks saved usage", asy
   view.trigger().props.onClick();
   assert.equal(view.tooltip().props.open, true);
   assert.equal(view.requests.length, 2);
+  assert.doesNotMatch(view.requests[1].url, /refresh=1/);
+  assert.match(view.text(), /\$1\.25/);
+
+  view.requests[1].resolve(costResponse({ cost: 2, cost_per_turn: 2 }));
+  await flushPromises();
+
+  assert.match(view.text(), /\$2\.00/);
 });
 
 test("pinned Refresh forces one request and stays open while disabled", async () => {
@@ -633,69 +665,271 @@ test("Refresh error renders in place and re-enables the native button", async ()
   await flushPromises();
 
   assert.equal(view.tooltip().props.open, true);
-  assert.match(view.text(), /Couldn't load or refresh cost. Try again./);
+  assert.match(view.text(), /Couldn't load or refresh cost/);
+  assert.doesNotMatch(view.text(), /network down/);
   assert.equal(view.refresh().props.type, "button");
   assert.equal(view.refresh().props.disabled, false);
+  view.trigger().props.onFocus();
+  assert.equal(view.requests.length, 2, "a failed request waits for an explicit retry");
 });
 
-test("localized Action keeps unpriced saved usage unavailable without a success tone", async () => {
-  const view = createActionHarness({ action: true, locale: "pt-pt" });
-  assert.equal(view.translations().en.importTitle, "Import historical usage");
+test("HTML gateway failure shows a localized retry without exposing its body", async () => {
+  const view = createActionHarness({ locale: "pt-pt" });
+
   view.trigger().props.onClick();
-  view.requests[0].resolve(costResponse({ cost: 0, cost_known: false, cache_write: 12, reasoning: 4, total: 36 }));
+  view.requests[0].resolveResponse(
+    response("<!DOCTYPE html><title>Gateway failure</title>", {
+      status: 502,
+      contentType: "text/html; charset=utf-8",
+      jsonError: new SyntaxError("Unexpected token '<' in JSON"),
+    }),
+  );
   await flushPromises();
-  assert.equal(view.trigger().props.text, undefined);
-  assert.equal(view.trigger().props.tone, "neutral");
-  assert.match(view.text(), /Indisponível/);
-  assert.match(view.text(), /Escrita da cache12/);
-  assert.match(view.text(), /Raciocínio4/);
-  assert.doesNotMatch(view.text(), /\$0\.00/);
+
+  assert.match(view.text(), /Não foi possível carregar ou atualizar o custo/);
+  assert.doesNotMatch(view.text(), /DOCTYPE|Gateway failure|Unexpected token/);
+  assert.equal(view.refresh().props.disabled, false);
 });
 
+test("JSON errors, malformed JSON, and invalid report values never render as zero cost", async () => {
+  const invalidResponses = [
+    response({ error: "backend secret" }, { status: 503 }),
+    response(null, { jsonError: new SyntaxError("Unexpected end of JSON input") }),
+    response(costResponse({ cost: "not-a-number" })),
+    response(costResponse(), { contentType: "" }),
+  ];
 
-test("historical import actions follow the selected workspace and interpolate status values", async () => {
-  const actions = [];
-  const view = createActionHarness({ locale: "en", settings: true,
-    context: { getWorkspaceIds: () => ["ws-1", "ws-2"], getActiveWorkspaceId: () => "ws-2" },
-    invokeAction: (key, input) => {
-      actions.push({ key, input });
-      return Promise.resolve({ status: "completed", processed: 7, missing: 2, last_successful_at: "2026-10-05" });
-    },
+  for (const badResponse of invalidResponses) {
+    const view = createActionHarness();
+    view.trigger().props.onClick();
+    view.requests[0].resolveResponse(badResponse);
+    await flushPromises();
+    assert.match(view.text(), /Couldn't load or refresh cost/);
+    assert.doesNotMatch(view.text(), /\$0\.00|backend secret|Unexpected end/);
+    assert.equal(view.refresh().props.disabled, false);
+  }
+});
+
+test("pending reports poll without refresh, then explicit Refresh runs once and retains stale cost", async () => {
+  const view = createActionHarness();
+  const pendingCold = costResponse({
+    found: false,
+    cost: 0,
+    cost_per_turn: 0,
+    turns: 0,
+    input: 0,
+    output: 0,
+    acp_session_id: "acp-1",
+    report_state: "pending",
+    stale: false,
   });
-  await flushPromises();
-  assert.equal(actions[0].key, "historical-import-status");
-  assert.equal(actions[0].input.workspaceId, "ws-2");
-  assert.match(view.text(), /Processed 7 sessions/);
-  assert.match(view.text(), /2 sessions have no matching/);
-  assert.match(view.text(), /Last successful pass: 2026-10-05/);
-  const start = findElement(view.tree(), (node) => node.type === "Button" && renderedText(node) === "Import again");
-  start.props.onClick();
-  await flushPromises();
-  assert.equal(actions[1].key, "historical-import-start");
-  assert.equal(actions[1].input.workspaceId, "ws-2");
-});
 
-test("authenticated usage action polls a pending report without repeating refresh", async () => {
-  const actions = [];
-  const results = [costResponse({ found: false, report_state: "pending" }), costResponse({ report_state: "ready", saved: true })];
-  const view = createActionHarness({ invokeAction(key, input, options) {
-    actions.push({key, input, options});
-    return Promise.resolve(results.shift());
-  }});
   view.trigger().props.onClick();
+  view.requests[0].resolve(pendingCold);
   await flushPromises();
-  assert.equal(actions.length, 1);
-  assert.equal(actions[0].key, "session-usage");
-  assert.equal(actions[0].input.body.refresh, false);
-  assert.ok(actions[0].options.signal instanceof AbortSignal);
   assert.match(view.text(), /Calculating cost/);
   assert.equal(view.refresh().props.disabled, true);
-  view.advanceTime(2000);
+  assert.equal(view.busyRegion().props["aria-busy"], true);
+
+  view.advanceTimers(1999);
+  assert.equal(view.requests.length, 1);
+  view.advanceTimers(1);
+  assert.equal(view.requests.length, 2);
+  assert.doesNotMatch(view.requests[1].url, /refresh=1/);
+  view.requests[1].resolve(costResponse({ cost: 0.58, cost_per_turn: 0.29, turns: 2 }));
   await flushPromises();
-  assert.equal(actions.length, 2);
-  assert.equal(actions[1].input.body.refresh, false);
-  assert.match(view.text(), /\$1.00/);
+  assert.match(view.text(), /\$0\.58/);
   assert.equal(view.refresh().props.disabled, false);
-  view.advanceTime(4000);
-  assert.equal(actions.length, 2);
+
+  view.refresh().props.onClick();
+  assert.match(view.requests[2].url, /refresh=1/);
+  assert.equal(view.requests.length, 3);
+  const pendingRefresh = costResponse({ report_state: "pending", stale: true, cost: 0.58, cost_per_turn: 0.29, turns: 2 });
+  view.requests[2].resolve(pendingRefresh);
+  await flushPromises();
+  assert.match(view.text(), /Updating cost\. Showing the previous result/);
+  assert.match(view.text(), /\$0\.58/);
+  assert.equal(view.refresh().props.disabled, true);
+
+  view.advanceTimers(2000);
+  assert.equal(view.requests.length, 4);
+  assert.doesNotMatch(view.requests[3].url, /refresh=1/);
+  view.requests[3].resolve(costResponse({ cost: 0.75, cost_per_turn: 0.25, turns: 3 }));
+  await flushPromises();
+  assert.match(view.text(), /\$0\.75/);
+  assert.doesNotMatch(view.text(), /previous result/);
+});
+
+test("server refresh failure keeps the last cost and offers a retry", async () => {
+  const view = createActionHarness();
+  view.trigger().props.onClick();
+  view.requests[0].resolve(costResponse({ cost: 0.58, cost_per_turn: 0.29, turns: 2 }));
+  await flushPromises();
+
+  view.refresh().props.onClick();
+  view.requests[1].resolve(
+    costResponse({
+      report_state: "failed",
+      report_error: "timeout",
+      stale: true,
+      cost: 0.58,
+      cost_per_turn: 0.29,
+      turns: 2,
+    }),
+  );
+  await flushPromises();
+
+  assert.match(view.text(), /Couldn't refresh cost\. Showing the previous result/);
+  assert.match(view.text(), /\$0\.58/);
+  assert.equal(view.refresh().props.disabled, false);
+  assert.doesNotMatch(view.text(), /timeout/);
+});
+
+test("legacy ready payloads without progress fields still render", async () => {
+  const view = createActionHarness();
+  const legacy = costResponse({ cost: 1.25, cost_per_turn: 1.25 });
+  delete legacy.report_state;
+  delete legacy.report_error;
+  delete legacy.stale;
+
+  view.trigger().props.onClick();
+  view.requests[0].resolve(legacy);
+  await flushPromises();
+
+  assert.match(view.text(), /\$1\.25/);
+  assert.equal(view.busyRegion().props["aria-busy"], false);
+});
+
+test("missing transcript keeps its empty state when no report command ran", async () => {
+  const view = createActionHarness();
+  view.trigger().props.onClick();
+  view.requests[0].resolve(
+    costResponse({
+      found: false,
+      cost: 0,
+      cost_per_turn: 0,
+      turns: 0,
+      acp_session_id: "",
+      tokscale: { installed: false },
+      report_state: "ready",
+    }),
+  );
+  await flushPromises();
+
+  assert.match(view.text(), /No agent transcript for this session yet/);
+  assert.doesNotMatch(view.text(), /tokscale isn't available/);
+});
+
+test("JSON media types with a structured suffix remain valid", async () => {
+  const view = createActionHarness();
+  view.trigger().props.onClick();
+  view.requests[0].resolve(costResponse({ cost: 1.5 }), { contentType: "application/problem+json; charset=utf-8" });
+  await flushPromises();
+
+  assert.match(view.text(), /\$1\.50/);
+});
+
+test("closing or unmounting pending details cancels polling and obsolete requests", async () => {
+  const view = createActionHarness();
+  view.trigger().props.onClick();
+  view.requests[0].resolve(costResponse({ found: false, cost: 0, turns: 0, report_state: "pending" }));
+  await flushPromises();
+  assert.equal(view.pendingTimers(), 2);
+
+  view.advanceTimers(2000);
+  assert.equal(view.requests.length, 2);
+  const pollRequest = view.requests[1];
+  view.trigger().props.onClick();
+  assert.equal(view.tooltip().props.open, false);
+  assert.equal(pollRequest.signal.aborted, true);
+  view.advanceTimers(4000);
+  assert.equal(view.requests.length, 2);
+  pollRequest.resolve(costResponse({ cost: 99 }));
+  await flushPromises();
+  assert.doesNotMatch(view.text(), /\$99\.00/);
+
+  view.trigger().props.onClick();
+  assert.equal(view.requests.length, 3);
+  view.requests[2].resolve(costResponse({ found: false, cost: 0, turns: 0, report_state: "pending" }));
+  await flushPromises();
+  assert.equal(view.pendingTimers(), 2);
+  view.advanceTimers(2000);
+  assert.equal(view.requests.length, 4);
+  view.unmount();
+  assert.equal(view.pendingTimers(), 0);
+  view.advanceTimers(4000);
+  assert.equal(view.requests.length, 4);
+});
+
+test("reopening after the initial request is canceled starts a fresh request", () => {
+  const view = createActionHarness();
+
+  view.trigger().props.onClick();
+  const canceledRequest = view.requests[0];
+  view.trigger().props.onClick();
+  assert.equal(canceledRequest.signal.aborted, true);
+
+  view.trigger().props.onClick();
+  assert.equal(view.tooltip().props.open, true);
+  assert.equal(view.requests.length, 2);
+  assert.equal(view.requests[1].signal.aborted, false);
+  view.unmount();
+});
+
+test("session changes abort old requests and ignore their late response", async () => {
+  const view = createActionHarness();
+  view.trigger().props.onClick();
+  const oldRequest = view.requests[0];
+  view.rerender({ taskId: "task-1", activeSessionId: "session-2", sessionIds: ["session-1", "session-2"] });
+  assert.equal(oldRequest.signal.aborted, true);
+  oldRequest.resolve(costResponse({ cost: 9 }));
+  await flushPromises();
+
+  view.trigger().props.onClick();
+  view.requests[1].resolve(costResponse({ cost: 2, acp_session_id: "acp-2" }));
+  await flushPromises();
+  assert.match(view.text(), /\$2\.00/);
+  assert.doesNotMatch(view.text(), /\$9\.00/);
+});
+
+test("request timeout aborts the fetch and preserves a previous result", async () => {
+  const view = createActionHarness();
+  view.trigger().props.onClick();
+  view.requests[0].resolve(costResponse({ cost: 0.58, cost_per_turn: 0.29, turns: 2 }));
+  await flushPromises();
+
+  view.refresh().props.onClick();
+  const refreshRequest = view.requests[1];
+  view.advanceTimers(10000);
+
+  assert.equal(refreshRequest.signal.aborted, true);
+  assert.match(view.text(), /Couldn't refresh cost\. Showing the previous result/);
+  assert.match(view.text(), /\$0\.58/);
+  assert.equal(view.refresh().props.disabled, false);
+});
+
+test("automatic polling stops at 130 elapsed seconds and aborts an in-flight poll", async () => {
+  const view = createActionHarness();
+  view.trigger().props.onClick();
+  view.requests[0].resolve(costResponse({ found: false, cost: 0, turns: 0, report_state: "pending" }));
+  await flushPromises();
+
+  for (let poll = 0; poll < 24; poll += 1) {
+    view.advanceTimers(2000);
+    const request = view.requests[view.requests.length - 1];
+    assert.equal(view.requests.length, poll + 2);
+    view.advanceTimers(3000);
+    request.resolve(costResponse({ found: false, cost: 0, turns: 0, report_state: "pending" }));
+    await flushPromises();
+  }
+
+  view.advanceTimers(2000);
+  assert.equal(view.requests.length, 26);
+  const inFlightPoll = view.requests[25];
+  view.advanceTimers(8000);
+
+  assert.equal(inFlightPoll.signal.aborted, true);
+  assert.match(view.text(), /Cost calculation is taking too long/);
+  assert.equal(view.refresh().props.disabled, false);
+  assert.equal(view.pendingTimers(), 0);
 });

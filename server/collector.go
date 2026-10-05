@@ -64,7 +64,9 @@ func (p *plugin) collectionInterval(ctx context.Context) time.Duration {
 }
 
 func (p *plugin) startCollector() {
-	if !p.collectionEnabled(context.Background()) {
+	ctx, cancelConfig := context.WithTimeout(context.Background(), p.hostRead)
+	defer cancelConfig()
+	if !p.collectionEnabled(ctx) {
 		return
 	}
 	p.collectorMu.Lock()

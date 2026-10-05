@@ -49,6 +49,8 @@ type plugin struct {
 	now              func() time.Time
 	reportMu         sync.Mutex
 	reports          *reportCoordinator
+	toolbar          *toolbarReportCoordinator
+	hostRead         time.Duration
 	collectorMu      sync.Mutex
 	collectorStarted bool
 	collectorCancel  context.CancelFunc
@@ -59,7 +61,7 @@ type plugin struct {
 }
 
 func newPlugin() *plugin {
-	return &plugin{
+	p := &plugin{
 		run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			return runCommand(ctx, name, args...)
 		},
@@ -67,6 +69,9 @@ func newPlugin() *plugin {
 		now:      time.Now,
 		reports:  newReportCoordinator(),
 	}
+	p.hostRead = 3 * time.Second
+	p.toolbar = newToolbarReportCoordinator(p.runReport, func() time.Time { return p.now() })
+	return p
 }
 
 func (p *plugin) SetHost(host pluginsdk.Host) {
@@ -78,6 +83,8 @@ func (p *plugin) SetHost(host pluginsdk.Host) {
 // renders in its hover popover.
 type sessionCostResponse struct {
 	GeneratedAt string        `json:"generated_at"`
+	ReportState string        `json:"report_state,omitempty"`
+	ReportError string        `json:"report_error,omitempty"`
 	Tokscale    InstallStatus `json:"tokscale"`
 	// KandevSessionID is the active composer session id the UI asked about.
 	KandevSessionID string `json:"kandev_session_id"`
@@ -136,16 +143,20 @@ func (p *plugin) HandleWebhook(ctx context.Context, req *pluginsdk.WebhookReques
 	}
 	query, err := url.ParseQuery(req.Query)
 	if err != nil {
-		query = url.Values{}
+		return jsonResponse(400, []byte(`{"error":"invalid query"}`)), nil
 	}
 	taskID := query.Get("task_id")
 	activeSessionID := query.Get("active")
 
-	body, err := p.sessionCost(ctx, taskID, activeSessionID)
+	response, err := p.responsiveSessionUsage(ctx, "", taskID, activeSessionID, query.Get("refresh") == "1")
+	body, encodeErr := json.Marshal(response)
+	if err == nil {
+		err = encodeErr
+	}
 	if err != nil {
 		log.Printf("session-cost failed: %v", err)
 		msg, _ := json.Marshal(map[string]string{"error": err.Error()})
-		return jsonResponse(500, msg), nil
+		return jsonResponse(503, msg), nil
 	}
 	return jsonResponse(200, body), nil
 }
@@ -173,7 +184,7 @@ func (p *plugin) HandleAction(ctx context.Context, req *pluginsdk.PluginActionRe
 			return &pluginsdk.PluginActionResponse{Status: 400, Headers: jsonHeaders(), Body: []byte(`{"error":"invalid request"}`)}, nil
 		}
 	}
-	response, err := p.sessionUsage(ctx, req.Context.WorkspaceID, req.Context.TaskID, req.Context.SessionID, body.Refresh)
+	response, err := p.responsiveSessionUsage(ctx, req.Context.WorkspaceID, req.Context.TaskID, req.Context.SessionID, body.Refresh)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +233,7 @@ func (p *plugin) calculateSessionCost(ctx context.Context, taskID, activeSession
 		// Degrade to a status-only payload so the UI can render setup guidance
 		// from the same shape it always reads.
 		log.Printf("tokscale run failed (degrading): %v", err)
-		resp.Tokscale = probeInstall(runCtx, cmd, p.run)
+		resp.Tokscale = InstallStatus{Command: commandDisplay(cmd), Source: cmd.Source, Error: err.Error()}
 		resp.Error = err.Error()
 		return &resp, nil
 	}
@@ -893,6 +904,14 @@ func runSessionModels(ctx context.Context, cmd resolvedCommand, run runner, extr
 	var report sessionModelsReport
 	if err := json.Unmarshal(out, &report); err != nil {
 		return nil, fmt.Errorf("parsing tokscale output: %w", err)
+	}
+	if report.Entries == nil {
+		return nil, fmt.Errorf("parsing tokscale output: missing entries array")
+	}
+	for _, entry := range report.Entries {
+		if entry.SessionID == "" || entry.Model == "" {
+			return nil, fmt.Errorf("parsing tokscale entry: missing identity")
+		}
 	}
 	return report.Entries, nil
 }

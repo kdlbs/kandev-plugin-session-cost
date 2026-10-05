@@ -37,8 +37,13 @@ Settings are generated from `manifest.yaml`:
   card offers an explicit, resumable historical import using dated buckets.
 - Saved canonical usage loads before an explicit refresh. Unknown cost remains
   unavailable rather than appearing as zero.
-- Refresh is available while details are pinned. It recalculates the active
-  session once and remains disabled until the request finishes.
+- Refresh is available while details are pinned. Reports run in the background
+  and share one subprocess with collection and import. Details poll every two
+  seconds, retain previous values on failure, and stop polling after 130 seconds.
+  Closing details cancels the browser request; reopening reads saved usage again.
+  Each request has a ten-second timeout. Reports cache successful data for
+  thirty seconds. Shutdown cancels and drains the shared subprocess. Sessions
+  without a transcript do not start a report.
 - The total changes from green to amber at `warn_threshold` and to red at
   `high_threshold`.
 - The backend maps the Kandev session ID to the agent transcript ID. The UI

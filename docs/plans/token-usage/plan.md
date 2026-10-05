@@ -330,3 +330,20 @@ cover canceled report joining, complete rejected batches, dated scheduling,
 cancelled import state, resumed pending dates, interval waits, timezone/date
 alignment, and descendant shutdown. Documentation now names actual tests and
 describes ticker reconciliation instead of unimplemented lifecycle events.
+
+
+## Compatibility with Session Cost 0.4.1
+
+The 0.5.0 branch includes the responsive lookup changes from main. Toolbar
+requests use the authenticated saved-usage action and return pending reports
+without waiting for tokscale. Polls retain the pending state over older saved
+usage, then persist the accepted result and read canonical usage. The process
+owns report cancellation, the 30-second cache and the failure cooldown. Dated
+collection and import share the same serialized subprocess runner. Shutdown
+cancels and drains that runner, including work started outside the toolbar.
+
+The UI preserves bounded polling, request cancellation, reopening recovery,
+unknown costs and the extra token categories. The installed-package smoke test
+uses a blocked command fixture, two transcript identities, an explicit refresh
+and failure recovery on desktop and mobile. Unit tests cover both the upstream
+responsive behavior and the statistics integration.

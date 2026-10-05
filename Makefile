@@ -14,7 +14,7 @@ build:
 ## Run Go, browser-bundle, package-verifier, and release-version checks.
 test:
 	go test ./server/...
-	node --test test/bundle.test.mjs
+	node --test test/*.test.mjs
 	node --check ui/bundle.js
 	sh scripts/test-verify-package.sh
 	sh scripts/test-verify-release-version.sh
