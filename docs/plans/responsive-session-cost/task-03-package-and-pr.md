@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: done
 requirements:
   - REQ-SESSION-COST-LOOKUP-001
   - REQ-SESSION-COST-RECOVERY-002
@@ -111,4 +111,6 @@ The exact package passed the disposable packaged host smoke on Linux amd64 in de
 
 Package: `kandev-session-cost-0.4.0.tar.gz`; SHA-256: `4a6bcf5512ebd6592e3367b20b2577e52a554d3d869949c989be21f43b5b2766`.
 
-Remote `main` remains `91be5a0046b869fbb87551d8753ea094e0adc349`. PR #10 remains open at `76e74ad0fa69ba4a254f730ff3c36d5fd5428b5a`; its persistent collection overlaps files in this repair. The PR description will call out that overlap. The generated package/build outputs and owned pinned-SDK checkout were removed after verification. Commit, push, and PR URL will be recorded after delivery.
+Remote `main` remains `91be5a0046b869fbb87551d8753ea094e0adc349`. PR #10 remains open at `76e74ad0fa69ba4a254f730ff3c36d5fd5428b5a`; its persistent collection overlaps files in this repair. The PR description records that overlap. The generated package/build outputs and owned pinned-SDK checkout were removed after verification.
+
+Implementation commit `98d316bafd8f9e0bfe3bb6342321d3360969bb16` was pushed on `feature/diagnose-session-cos-3b5`. PR #14 is open against `main`: https://github.com/kdlbs/kandev-plugin-session-cost/pull/14. At the last check, Build and CI were queued and Greptile was in progress; no CI success is claimed.

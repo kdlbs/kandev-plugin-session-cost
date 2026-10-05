@@ -26,7 +26,7 @@ Work runs sequentially in the primary conversation. This plan does not authorize
 | --- | --- | --- |
 | 1 | [Background report and prompt responses](task-01-background-report.md) | done |
 | 2 | [Progress and transport recovery](task-02-progress-and-recovery.md) | done |
-| 3 | [Package verification and PR delivery](task-03-package-and-pr.md) | in progress |
+| 3 | [Package verification and PR delivery](task-03-package-and-pr.md) | done |
 
 ## Assumption check
 
@@ -95,4 +95,4 @@ PR #10 overlaps this change. Record any remaining overlap in the PR description.
 
 ## Results
 
-Tasks 01 and 02 are complete. Source, package, desktop, phone, and documentation checks pass. Task 03 delivery is in progress; commit, push, and PR creation remain.
+All three work orders are complete. Source, package, desktop, phone, and documentation checks pass. Commit `98d316bafd8f9e0bfe3bb6342321d3360969bb16` is on `feature/diagnose-session-cos-3b5`, and [PR #14](https://github.com/kdlbs/kandev-plugin-session-cost/pull/14) is open. Required GitHub CI checks were queued at the last check.
