@@ -135,6 +135,12 @@ export async function runSessionCostHostSmoke({
       await expect(openingAction).toHaveAttribute("data-slot", "surface-action");
       await expect(openingAction).toHaveAttribute("data-surface", "composer");
       await expect(openingAction).toHaveAttribute("aria-label", "Session cost");
+      const startButton = setup.getByTestId("quick-chat-send");
+      // The host sends disabled=true to plugin actions while this empty
+      // opening composer cannot submit. Session Cost remains an independent,
+      // read-only action that explains there is no active session to load.
+      await expect(startButton).toBeDisabled();
+      await expect(openingAction).toBeEnabled();
 
       if (touch) {
         const bounds = await waitForTouchTarget(openingAction, expect);
@@ -146,6 +152,12 @@ export async function runSessionCostHostSmoke({
         await openingAction.press("Enter");
       }
       await expect(openingAction).toHaveAttribute("aria-expanded", "true");
+      await expect(
+        testPage
+          .locator('[data-slot="tooltip-content"]:visible')
+          .getByText("Open to load session cost", { exact: true })
+          .first(),
+      ).toBeVisible();
       await testPage.keyboard.press("Escape");
       await expect(openingAction).toHaveAttribute("aria-expanded", "false");
 
@@ -164,6 +176,10 @@ export async function runSessionCostHostSmoke({
         pathToFileURL(path.join(hostRoot, "apps/web/e2e/tests/chat/quick-chat-helpers.ts")).href
       );
       await selectAgentIfNeeded(dialog, testPage);
+      // A selected profile still cannot submit an empty prompt. Check that the
+      // host's composer-disabled state does not disable this read-only action.
+      await expect(startButton).toBeDisabled();
+      await expect(openingAction).toBeEnabled();
       const startResponsePromise = testPage.waitForResponse(
         (response) =>
           new URL(response.url()).pathname.endsWith("/quick-chat") &&
@@ -171,7 +187,6 @@ export async function runSessionCostHostSmoke({
         { timeout: 30_000 },
       );
       await setup.getByTestId("task-description-input").fill("Session Cost action smoke");
-      const startButton = setup.getByTestId("quick-chat-send");
       await expect(startButton).toBeEnabled({ timeout: 10_000 });
       if (touch) await startButton.tap();
       else await startButton.click();
