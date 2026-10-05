@@ -13,31 +13,47 @@ permissions:
 
 jobs:
   package:
-    name: Build plugin packages
+    name: Build and verify plugin packages
     runs-on: ubuntu-latest
     steps:
       - name: Check out plugin
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           path: plugin
 
-      - name: Check out kandev SDK
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - name: Read pinned Kandev source revision
+        id: sdk
+        working-directory: plugin
+        run: |
+          set -euo pipefail
+          sdk_ref="$(cat .kandev-sdk-ref)"
+          [[ "$sdk_ref" =~ ^[0-9a-f]{40}$ ]]
+          echo "ref=$sdk_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Kandev package tooling
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: kdlbs/kandev
           path: kandev
-          sparse-checkout: apps/backend
+          ref: ${{ steps.sdk.outputs.ref }}
+          sparse-checkout: |
+            apps/backend
+            apps/packages/plugin-sdk
 
       - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: plugin/go.mod
           cache-dependency-path: plugin/go.sum
 
-      - name: Build host binary
+      - name: Build plugin binary
         working-directory: plugin
         run: make build
 
-      - name: Package all supported platforms
+      - name: Verify host-platform package
         working-directory: plugin
-        run: make package
+        run: make verify-package-host
+
+      - name: Verify all supported platforms
+        working-directory: plugin
+        run: make verify-package

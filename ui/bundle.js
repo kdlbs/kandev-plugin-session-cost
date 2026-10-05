@@ -18,6 +18,78 @@ var COLOR = {
 // Per-model dot palette, cycled by a stable hash of the model name.
 var MODEL_DOTS = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#f43f5e"];
 
+var TRANSLATIONS = {
+  en: {
+    actionLabel: "Session cost",
+    calculatingCost: "Calculating cost…",
+    loadCostError: "Couldn't load cost: {{error}}",
+    openToLoadCost: "Open to load session cost",
+    tokscaleUnavailable: "tokscale isn't available — set its command in Settings → Plugins → Session Cost.",
+    noAgentTranscript: "No agent transcript for this session yet — run the agent first.",
+    noRecordedUsage: "No recorded usage for this session yet.",
+    turnCount_one: "{{count}} turn",
+    turnCount_other: "{{count}} turns",
+    costPerTurn: "{{amount}} / turn",
+    input: "Input",
+    output: "Output",
+    cacheRead: "Cache read",
+    modelInput: "In {{count}}",
+    modelOutput: "Out {{count}}",
+    modelCacheRead: "Cache {{count}}",
+    refreshSessionCost: "Refresh session cost",
+    refreshingCost: "Refreshing…",
+    refresh: "Refresh",
+  },
+  "pt-pt": {
+    actionLabel: "Custo da sessão",
+    calculatingCost: "A calcular o custo…",
+    loadCostError: "Não foi possível carregar o custo: {{error}}",
+    openToLoadCost: "Abra para carregar o custo da sessão",
+    tokscaleUnavailable: "tokscale não está disponível — defina o comando em Definições → Plugins → Session Cost.",
+    noAgentTranscript: "Ainda não existe uma transcrição do agente para esta sessão — execute o agente primeiro.",
+    noRecordedUsage: "Ainda não há utilização registada para esta sessão.",
+    turnCount_one: "{{count}} turno",
+    turnCount_other: "{{count}} turnos",
+    costPerTurn: "{{amount}} / turno",
+    input: "Entrada",
+    output: "Saída",
+    cacheRead: "Leitura da cache",
+    modelInput: "Entrada {{count}}",
+    modelOutput: "Saída {{count}}",
+    modelCacheRead: "Cache {{count}}",
+    refreshSessionCost: "Atualizar o custo da sessão",
+    refreshingCost: "A atualizar…",
+    refresh: "Atualizar",
+  },
+};
+
+function englishMessage(key, options) {
+  var count = options && options.count;
+  var pluralKey = count === undefined ? key : key + (count === 1 ? "_one" : "_other");
+  return TRANSLATIONS.en[pluralKey] || TRANSLATIONS.en[key] || key;
+}
+
+function interpolate(message, options) {
+  var values = Object.assign({}, (options && options.values) || {});
+  if (options && options.count !== undefined) values.count = options.count;
+  return String(message).replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, function (_match, name) {
+    return values[name] === undefined ? "" : String(values[name]);
+  });
+}
+
+function translate(t, key, options) {
+  var settings = options || {};
+  var defaultValue = englishMessage(key, settings);
+  if (typeof t === "function") {
+    return t(key, {
+      defaultValue: defaultValue,
+      count: settings.count,
+      values: settings.values,
+    });
+  }
+  return interpolate(defaultValue, settings);
+}
+
 // tierColor maps a session cost to a colour using the backend-supplied
 // thresholds: green below warn, amber at/above warn, red at/above high.
 function tierColor(cost, warn, high) {
@@ -76,7 +148,7 @@ function coinsIcon(h, size, color) {
 }
 
 // ---- popover pieces -------------------------------------------------------
-function headerRow(h) {
+function headerRow(h, t) {
   return h(
     "div",
     {
@@ -92,7 +164,7 @@ function headerRow(h) {
       },
     },
     coinsIcon(h, 13, COLOR.accent),
-    h("span", null, "Session cost"),
+    h("span", null, translate(t, "actionLabel")),
   );
 }
 
@@ -124,10 +196,10 @@ function stateShell(h, header, body) {
   );
 }
 
-function costCard(h, d) {
+function costCard(h, d, t) {
   var color = tierColor(d.cost, d.warn_threshold, d.high_threshold);
   var rows = [
-    headerRow(h),
+    headerRow(h, t),
     // Headline amount, coloured by spend tier.
     h(
       "div",
@@ -150,11 +222,11 @@ function costCard(h, d) {
             fontSize: "11px",
           },
         },
-        h("span", { style: { opacity: 0.65 } }, d.turns + (d.turns === 1 ? " turn" : " turns")),
+        h("span", { style: { opacity: 0.65 } }, translate(t, "turnCount", { count: d.turns })),
         h(
           "span",
           { style: { color: COLOR.accent, fontWeight: 600, fontVariantNumeric: "tabular-nums" } },
-          fmtUSD(d.cost_per_turn, 4) + " / turn",
+          translate(t, "costPerTurn", { values: { amount: fmtUSD(d.cost_per_turn, 4) } }),
         ),
       ),
     );
@@ -165,9 +237,9 @@ function costCard(h, d) {
     h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "2px" } },
-      statRow(h, "Input", fmtCompact(d.input)),
-      statRow(h, "Output", fmtCompact(d.output)),
-      statRow(h, "Cache read", fmtCompact(d.cache_read)),
+      statRow(h, translate(t, "input"), fmtCompact(d.input)),
+      statRow(h, translate(t, "output"), fmtCompact(d.output)),
+      statRow(h, translate(t, "cacheRead"), fmtCompact(d.cache_read)),
     ),
   );
 
@@ -224,17 +296,17 @@ function costCard(h, d) {
               h(
                 "span",
                 { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "left" } },
-                "In " + fmtCompact(m.input),
+                translate(t, "modelInput", { values: { count: fmtCompact(m.input) } }),
               ),
               h(
                 "span",
                 { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "center" } },
-                "Out " + fmtCompact(m.output),
+                translate(t, "modelOutput", { values: { count: fmtCompact(m.output) } }),
               ),
               h(
                 "span",
                 { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" } },
-                "Cache " + fmtCompact(m.cache_read),
+                translate(t, "modelCacheRead", { values: { count: fmtCompact(m.cache_read) } }),
               ),
             ),
           );
@@ -251,8 +323,8 @@ function costCard(h, d) {
 }
 
 // tooltipBody renders the popover contents for the current fetch state.
-function tooltipBody(h, ui, state) {
-  var header = headerRow(h);
+function tooltipBody(h, ui, state, t) {
+  var header = headerRow(h, t);
   if (state.loading) {
     return stateShell(
       h,
@@ -261,19 +333,19 @@ function tooltipBody(h, ui, state) {
         "span",
         { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
         ui.Spinner ? h(ui.Spinner, { style: { width: "13px", height: "13px" } }) : null,
-        "Calculating cost…",
+        translate(t, "calculatingCost"),
       ),
     );
   }
-  if (state.error) return stateShell(h, header, "Couldn't load cost: " + state.error);
+  if (state.error) return stateShell(h, header, translate(t, "loadCostError", { values: { error: state.error } }));
   var d = state.data;
-  if (!d) return stateShell(h, header, "Open to load session cost");
+  if (!d) return stateShell(h, header, translate(t, "openToLoadCost"));
   if (d.tokscale && d.tokscale.installed === false) {
-    return stateShell(h, header, "tokscale isn't available — set its command in Settings → Plugins → Session Cost.");
+    return stateShell(h, header, translate(t, "tokscaleUnavailable"));
   }
-  if (!d.acp_session_id) return stateShell(h, header, "No agent transcript for this session yet — run the agent first.");
-  if (!d.found) return stateShell(h, header, "No recorded usage for this session yet.");
-  return costCard(h, d);
+  if (!d.acp_session_id) return stateShell(h, header, translate(t, "noAgentTranscript"));
+  if (!d.found) return stateShell(h, header, translate(t, "noRecordedUsage"));
+  return costCard(h, d, t);
 }
 
 // inlineCost is the small coloured amount shown next to the icon once loaded,
@@ -303,8 +375,14 @@ function makeSessionCostAction(host) {
   var Tooltip = ui.Tooltip;
   var TooltipTrigger = ui.TooltipTrigger;
   var TooltipContent = ui.TooltipContent;
+  var useTranslation = host.i18n && typeof host.i18n.useTranslation === "function"
+    ? host.i18n.useTranslation
+    : null;
 
   return function SessionCostAction(props) {
+    var translation = useTranslation ? useTranslation() : null;
+    var t = translation && translation.t;
+    var actionLabel = translate(t, "actionLabel");
     var ctx = (props && props.slotProps) || {};
     var activeSession = ctx.activeSessionId || null;
     var openHook = React.useState(false);
@@ -419,6 +497,64 @@ function makeSessionCostAction(host) {
 
     var loaded = !visibleState.loading && !visibleState.error ? visibleState.data : null;
     var iconColor = loaded && loaded.found ? tierColor(loaded.cost, loaded.warn_threshold, loaded.high_threshold) : undefined;
+    var hasInlineCost = loaded && loaded.found && !(loaded.tokscale && loaded.tokscale.installed === false);
+
+    function onTriggerClick() {
+      pinnedRef.current = stateMatchesActive ? !pinnedRef.current : true;
+      setPinned(pinnedRef.current);
+      setOpen(pinnedRef.current);
+      if (pinnedRef.current) load(false);
+    }
+
+    var actionTone =
+      iconColor === COLOR.red ? "danger" : iconColor === COLOR.amber ? "warning" : iconColor ? "success" : "neutral";
+    var trigger =
+      typeof ui.Action === "function"
+        ? h(ui.Action, {
+            ref: triggerRef,
+            id: "session-cost-action",
+            label: actionLabel,
+            icon: coinsIcon(h, 16, iconColor),
+            text: loaded && loaded.found ? fmtUSD(loaded.cost) : undefined,
+            tone: actionTone,
+            pressed: visiblePinned,
+            tooltip: "",
+            "aria-expanded": visibleOpen,
+            onMouseEnter: function () {
+              load(false);
+            },
+            onFocus: function () {
+              load(false);
+            },
+            onClick: onTriggerClick,
+          })
+        : h(
+            Button,
+            {
+              ref: triggerRef,
+              id: "session-cost-action",
+              type: "button",
+              variant: "ghost",
+              size: loaded && loaded.found ? "sm" : "icon",
+              className:
+                (loaded && loaded.found ? "h-7 px-1.5 " : "h-7 w-7 ") +
+                (ctx.presentation === "mobile" ? "min-h-11 min-w-11 " : "") +
+                "[@media(pointer:coarse)]:h-11 " +
+                (hasInlineCost ? "" : "[@media(pointer:coarse)]:w-11 ") +
+                "cursor-pointer text-muted-foreground hover:text-foreground hover:bg-primary/10",
+              "aria-label": actionLabel,
+              "aria-expanded": visibleOpen,
+              onMouseEnter: function () {
+                load(false);
+              },
+              onFocus: function () {
+                load(false);
+              },
+              onClick: onTriggerClick,
+            },
+            coinsIcon(h, 16, iconColor),
+            inlineCost(h, loaded),
+          );
 
     return h(
       Tooltip,
@@ -429,39 +565,7 @@ function makeSessionCostAction(host) {
           setOpen(nextOpen);
         },
       },
-      h(
-        TooltipTrigger,
-        { asChild: true },
-        h(
-          Button,
-          {
-            ref: triggerRef,
-            id: "session-cost-action",
-            type: "button",
-            variant: "ghost",
-            size: loaded && loaded.found ? "sm" : "icon",
-            className:
-              (loaded && loaded.found ? "h-7 px-1.5 " : "h-7 w-7 ") +
-              "cursor-pointer text-muted-foreground hover:text-foreground hover:bg-primary/10",
-            "aria-label": "Session cost",
-            "aria-expanded": visibleOpen,
-            onMouseEnter: function () {
-              load(false);
-            },
-            onFocus: function () {
-              load(false);
-            },
-            onClick: function () {
-              pinnedRef.current = stateMatchesActive ? !pinnedRef.current : true;
-              setPinned(pinnedRef.current);
-              setOpen(pinnedRef.current);
-              if (pinnedRef.current) load(false);
-            },
-          },
-          coinsIcon(h, 16, iconColor),
-          inlineCost(h, loaded),
-        ),
-      ),
+      h(TooltipTrigger, { asChild: true }, trigger),
       h(
         TooltipContent,
         { side: "top", align: "end", className: "pointer-events-auto px-3 py-2.5" },
@@ -471,7 +575,7 @@ function makeSessionCostAction(host) {
             "aria-busy": visibleState.loading,
             style: { display: "flex", flexDirection: "column", gap: "8px" },
           },
-          tooltipBody(h, ui, visibleState),
+          tooltipBody(h, ui, visibleState, t),
           visiblePinned
             ? h(
                 Button,
@@ -480,13 +584,13 @@ function makeSessionCostAction(host) {
                   variant: "ghost",
                   size: "sm",
                   className: "min-h-11 w-full cursor-pointer",
-                  "aria-label": "Refresh session cost",
+                  "aria-label": translate(t, "refreshSessionCost"),
                   disabled: visibleState.loading,
                   onClick: function () {
                     load(true);
                   },
                 },
-                visibleState.loading ? "Refreshing…" : "Refresh",
+                visibleState.loading ? translate(t, "refreshingCost") : translate(t, "refresh"),
               )
             : null,
         ),
@@ -497,6 +601,9 @@ function makeSessionCostAction(host) {
 
 window.registerKandevPlugin("kandev-session-cost", {
   initialize: function (registry, host) {
+    if (typeof registry.registerTranslations === "function") {
+      registry.registerTranslations(TRANSLATIONS);
+    }
     registry.registerComponent("chat-input-actions", makeSessionCostAction(host));
   },
 });
