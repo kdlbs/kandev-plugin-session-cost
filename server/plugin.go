@@ -61,7 +61,7 @@ type plugin struct {
 func newPlugin() *plugin {
 	return &plugin{
 		run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			return exec.CommandContext(ctx, name, args...).Output()
+			return runCommand(ctx, name, args...)
 		},
 		lookPath: exec.LookPath,
 		now:      time.Now,
@@ -464,6 +464,9 @@ func (p *plugin) persistSessionUsage(ctx context.Context, workspaceID, taskID, s
 }
 
 func (p *plugin) persistSessionUsageWithCoverage(ctx context.Context, workspaceID, taskID, sessionID string, response *sessionCostResponse, coverage usageCoverage) error {
+	if coverage.Date != "" && coverage.Timezone == "" {
+		return errors.New("cannot resolve source timezone; set TZ to an IANA timezone before dated collection")
+	}
 	host := p.Host()
 	if host == nil || workspaceID == "" || taskID == "" || sessionID == "" || response.ACPSessionID == "" {
 		return nil
@@ -541,6 +544,7 @@ func (p *plugin) persistSessionUsageWithCoverage(ctx context.Context, workspaceI
 	}
 	accepted := make([]pluginsdk.SessionUsageMeasurement, 0, len(results))
 	allHaveMeasurements := true
+	rejectedStatus := ""
 	for _, result := range results {
 		if result.Measurement != nil {
 			accepted = append(accepted, *result.Measurement)
@@ -551,13 +555,16 @@ func (p *plugin) persistSessionUsageWithCoverage(ctx context.Context, workspaceI
 		case "applied", "unchanged":
 			continue
 		case "stale", "conflict":
-			return &usageWriteRejectedError{status: result.Status, measurements: accepted, complete: allHaveMeasurements}
+			rejectedStatus = result.Status
 		default:
 			if result.Error != "" {
 				return errors.New(result.Error)
 			}
 			return fmt.Errorf("usage write for %s returned status %q", result.Model, result.Status)
 		}
+	}
+	if rejectedStatus != "" {
+		return &usageWriteRejectedError{status: rejectedStatus, measurements: accepted, complete: allHaveMeasurements}
 	}
 	return nil
 }

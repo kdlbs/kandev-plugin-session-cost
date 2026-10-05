@@ -18,10 +18,10 @@ const (
 	collectorStateScope        = "plugin"
 	collectorStateID           = "collector"
 	collectorStateKey          = "checkpoint"
-	maxCollectorDays           = 31
 )
 
 type collectorCheckpoint struct {
+	LastDate    string                      `json:"last_date,omitempty"`
 	LastScanAt  string                      `json:"last_scan_at,omitempty"`
 	Initialized bool                        `json:"initialized"`
 	Pending     map[string]collectorPending `json:"pending,omitempty"`
@@ -130,7 +130,7 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 				pending.Attempts = 0
 				pending.DateAttempts = nil
 			}
-			if pending.Attempts >= maxFinalCollectionAttempts {
+			if pending.Attempts >= maxFinalCollectionAttempts && len(pending.Dates) == 0 {
 				continue
 			}
 		} else if !isActiveState(session.State) {
@@ -193,7 +193,7 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 		}
 	}
 
-	date := nextCollectionDate(checkpoint.Pending, eligible)
+	date := nextCollectionDate(checkpoint.Pending, eligible, checkpoint.LastDate)
 	if date != "" {
 		runCtx, cancel := context.WithTimeout(ctx, reportTimeout)
 		dateEntries, dateErr := p.runDatedReport(runCtx, cmd, date, date)
@@ -201,6 +201,7 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 		if dateErr != nil {
 			return dateErr
 		}
+		checkpoint.LastDate = date
 		for _, session := range eligible {
 			pending := checkpoint.Pending[session.ID]
 			if !containsDate(pending.Dates, date) {
@@ -353,69 +354,6 @@ func listCollectorSessions(ctx context.Context, reader pluginsdk.SessionReader, 
 	return result, nil
 }
 
-func mergeCollectionDays(existing []string, session pluginsdk.Session, now time.Time) []string {
-	seen := make(map[string]struct{}, len(existing)+1)
-	for _, date := range existing {
-		seen[date] = struct{}{}
-	}
-	start := parseSessionTime(session.StartedAt)
-	if start.IsZero() {
-		start = now
-	}
-	end := now
-	if parsed := parseSessionTime(session.UpdatedAt); !parsed.IsZero() && parsed.After(end) {
-		end = parsed
-	}
-	if session.EndedAt != nil {
-		if parsed := parseSessionTime(*session.EndedAt); !parsed.IsZero() {
-			end = parsed
-		}
-	}
-	location := sourceLocation()
-	day := start.In(location).Truncate(24 * time.Hour)
-	// Truncate is not a local midnight for non-UTC zones. Rebuild it from the
-	// calendar date so tokscale's local inclusive filters use the same day.
-	startLocal := start.In(location)
-	day = time.Date(startLocal.Year(), startLocal.Month(), startLocal.Day(), 0, 0, 0, 0, location)
-	endLocal := end.In(location)
-	last := time.Date(endLocal.Year(), endLocal.Month(), endLocal.Day(), 0, 0, 0, 0, location)
-	first := day
-	minimum := last.AddDate(0, 0, -(maxCollectorDays - 1))
-	if first.Before(minimum) {
-		first = minimum
-	}
-	for day = first; !day.After(last); day = day.AddDate(0, 0, 1) {
-		seen[day.Format("2006-01-02")] = struct{}{}
-	}
-	result := make([]string, 0, len(seen))
-	for date := range seen {
-		result = append(result, date)
-	}
-	sort.Strings(result)
-	if len(result) > maxCollectorDays {
-		result = result[len(result)-maxCollectorDays:]
-	}
-	return result
-}
-
-func mergeCurrentCollectionDay(existing []string, now time.Time) []string {
-	date := collectionDate(now)
-	seen := make(map[string]struct{}, len(existing)+1)
-	for _, value := range existing {
-		seen[value] = struct{}{}
-	}
-	seen[date] = struct{}{}
-	result := make([]string, 0, len(seen))
-	for value := range seen {
-		result = append(result, value)
-	}
-	sort.Strings(result)
-	if len(result) > maxCollectorDays {
-		result = result[len(result)-maxCollectorDays:]
-	}
-	return result
-}
-
 // collectorSessionDates is intentionally limited to scheduled collection's
 // live coverage. The explicit historical import owns older source-local days.
 func collectorSessionDates(session pluginsdk.Session, now time.Time) []string {
@@ -439,7 +377,7 @@ func collectionDate(value time.Time) string {
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location).Format("2006-01-02")
 }
 
-func nextCollectionDate(pending map[string]collectorPending, sessions []pluginsdk.Session) string {
+func nextCollectionDate(pending map[string]collectorPending, sessions []pluginsdk.Session, lastDate ...string) string {
 	activeDates := make([]string, 0)
 	terminalDates := make([]string, 0)
 	for _, session := range sessions {
@@ -453,14 +391,23 @@ func nextCollectionDate(pending map[string]collectorPending, sessions []pluginsd
 			terminalDates = append(terminalDates, item.Dates...)
 		}
 	}
-	// A current active snapshot must be collected promptly even when a
-	// terminal session has older finalization work waiting in the checkpoint.
+	// Start with active work, then rotate through every queued date so
+	// repeatedly queued active days cannot starve terminal stabilization.
 	dates := activeDates
 	if len(dates) == 0 {
 		dates = terminalDates
 	}
 	if len(dates) == 0 {
 		return ""
+	}
+	if len(lastDate) > 0 && lastDate[0] != "" {
+		dates = append(activeDates, terminalDates...)
+		sort.Strings(dates)
+		for _, date := range dates {
+			if date > lastDate[0] {
+				return date
+			}
+		}
 	}
 	sort.Strings(dates)
 	return dates[0]
@@ -496,15 +443,22 @@ func parseSessionTime(value string) time.Time {
 	return parsed
 }
 
-func sourceLocation() *time.Location { return time.Local }
+func sourceLocation() *time.Location {
+	if name := strings.TrimPrefix(strings.TrimSpace(os.Getenv("TZ")), ":"); name != "" {
+		if location, err := time.LoadLocation(name); err == nil {
+			return location
+		}
+	}
+	return time.Local
+}
 
 func sourceTimezone() string {
 	if name := sourceLocation().String(); name != "" && name != "Local" {
-		return name
+		if _, err := time.LoadLocation(name); err == nil {
+			return name
+		}
 	}
-	if name := strings.TrimPrefix(strings.TrimSpace(os.Getenv("TZ")), ":"); name != "" && name != "Local" {
-		return name
-	}
+
 	// time.Local commonly reports only "Local" even when the process is using
 	// an IANA zone. Recover the zone from the standard Unix localtime link so a
 	// saved source date can be interpreted with the same DST rules by the Host.
@@ -516,7 +470,7 @@ func sourceTimezone() string {
 			}
 		}
 	}
-	return "UTC"
+	return platformSourceTimezone()
 }
 
 func listAllSessions(ctx context.Context, reader pluginsdk.SessionReader) ([]pluginsdk.Session, error) {

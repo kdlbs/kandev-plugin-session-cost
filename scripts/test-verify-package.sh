@@ -118,6 +118,18 @@ mv "$test_dir/wrong-platform-set/manifest.next" "$test_dir/wrong-platform-set/ma
 write_checksums "$test_dir/wrong-platform-set"
 expect_failure 'a manifest with an undeclared platform' "$test_dir/wrong-platform-set" full
 
+copy_fixture unmatched-id-quote
+sed 's/^id: "kandev-session-cost"$/id: "kandev-session-cost/' "$test_dir/unmatched-id-quote/manifest.yaml" > "$test_dir/unmatched-id-quote/manifest.next"
+mv "$test_dir/unmatched-id-quote/manifest.next" "$test_dir/unmatched-id-quote/manifest.yaml"
+write_checksums "$test_dir/unmatched-id-quote"
+expect_failure 'an unmatched id quote' "$test_dir/unmatched-id-quote" full
+
+copy_fixture unmatched-path-quote
+sed 's#linux-amd64: "server/plugin-linux-amd64"#linux-amd64: "server/plugin-linux-amd64#' "$test_dir/unmatched-path-quote/manifest.yaml" > "$test_dir/unmatched-path-quote/manifest.next"
+mv "$test_dir/unmatched-path-quote/manifest.next" "$test_dir/unmatched-path-quote/manifest.yaml"
+write_checksums "$test_dir/unmatched-path-quote"
+expect_failure 'an unmatched executable quote' "$test_dir/unmatched-path-quote" full
+
 expect_failure 'an unsupported host platform' "$test_dir/valid" host freebsd-amd64
 
 printf 'package verifier negative tests passed\n'

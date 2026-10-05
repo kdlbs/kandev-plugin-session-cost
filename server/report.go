@@ -45,7 +45,7 @@ func (c *reportCoordinator) runScoped(ctx context.Context, cmd resolvedCommand, 
 			return c.wait(ctx, call)
 		}
 		call := c.inFlight
-		if call.scope == scope {
+		if call.scope == scope && call.waiters > 0 {
 			call.waiters++
 			c.mu.Unlock()
 			return c.wait(ctx, call)

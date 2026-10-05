@@ -77,4 +77,11 @@ make_fixture wrong-package-name
 wrong_name_file=$(make_archive "$test_dir/wrong-package-name" "renamed.tar.gz" "$base_version" kandev-session-cost)
 expect_failure 'an archive whose filename differs from the package version' "$test_dir/wrong-package-name" "v$base_version" "$wrong_name_file"
 
+make_fixture unmatched-package-version
+unmatched_file=$(make_archive "$test_dir/unmatched-package-version" "kandev-session-cost-$base_version.tar.gz" "$base_version" kandev-session-cost)
+sed 's/^version: "\(.*\)"$/version: "\1/' "$test_dir/unmatched-package-version/archive/manifest.yaml" > "$test_dir/unmatched-package-version/archive/manifest.next"
+mv "$test_dir/unmatched-package-version/archive/manifest.next" "$test_dir/unmatched-package-version/archive/manifest.yaml"
+tar -czf "$test_dir/unmatched-package-version/$unmatched_file" -C "$test_dir/unmatched-package-version/archive" manifest.yaml
+expect_failure 'an unmatched package version quote' "$test_dir/unmatched-package-version" "v$base_version" "$unmatched_file"
+
 printf 'release version negative tests passed\n'

@@ -129,4 +129,4 @@ The local React harness cannot prove touch geometry. Installed-plugin browser te
 
 Implemented saved-first session cost reads, refresh preservation on failure, session response fencing, cache-write and reasoning details, mobile-sized controls and the shared toolbar presentation.
 
-Validation: `make test vet build package-host` passed; the Node bundle suite passed 12/12; and `node --check ui/bundle.js` passed. Installed-plugin desktop and mobile E2E were not run.
+Validation: `make test vet build package-host` passed; the Node bundle suite passed 12/12; and `node --check ui/bundle.js` passed. The updated 0.5.0 package passed installed-plugin desktop and mobile browser smoke tests on 2026-10-05, with retries disabled. They cover touch geometry, session scope, saved reads, and explicit refresh.

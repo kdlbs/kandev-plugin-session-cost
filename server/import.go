@@ -235,6 +235,9 @@ func (p *plugin) runHistoricalImport(ctx context.Context, workspaceID string) {
 					return
 				}
 				if len(state.Dates) > 0 {
+					if !p.waitImportBudget(ctx) {
+						return
+					}
 					continue
 				}
 			}
@@ -259,13 +262,8 @@ func (p *plugin) runHistoricalImport(ctx context.Context, workspaceID string) {
 		if state.Status == importStatusCompleted {
 			return
 		}
-		// Let active/final collection and manual refresh take the next report
-		// slot before the next bounded import page.
-		select {
-		case <-ctx.Done():
-			p.finishHistoricalImport(workspaceID, importStatusCancelled, nil)
+		if !p.waitImportBudget(ctx) {
 			return
-		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }
@@ -338,7 +336,7 @@ func (p *plugin) finishHistoricalImport(workspaceID, status string, importErr er
 	if err != nil || !found {
 		return
 	}
-	if status == importStatusCancelled && state.Status == importStatusCancelled {
+	if state.Status == importStatusCancelled {
 		return
 	}
 	state.Status = status
@@ -400,4 +398,15 @@ func importJSONResponse(status int, body any) (*pluginsdk.PluginActionResponse, 
 		return nil, err
 	}
 	return &pluginsdk.PluginActionResponse{Status: status, Headers: jsonHeaders(), Body: encoded}, nil
+}
+
+func (p *plugin) waitImportBudget(ctx context.Context) bool {
+	timer := time.NewTimer(p.collectionInterval(ctx))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }

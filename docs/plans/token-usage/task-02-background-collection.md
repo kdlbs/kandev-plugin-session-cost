@@ -28,7 +28,7 @@ Add a single lifecycle-owned collector with operator settings. It collects eligi
 ## In scope
 
 - Add validated collection settings and persist pending final work and source revisions.
-- Use lifecycle events with bounded paginated reconciliation for restart gaps.
+- Use filtered ticker polling and paginated reconciliation for restart gaps. Lifecycle event delivery is not part of this implementation.
 - Skip idle scans, coalesce work, back off failures and cancel the subprocess tree on shutdown.
 - Add manifest settings tests and update README settings documentation.
 

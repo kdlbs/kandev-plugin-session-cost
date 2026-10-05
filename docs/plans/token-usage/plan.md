@@ -311,3 +311,22 @@ Verification passed:
 
 The browser tests used the rebuilt core host and the 0.5.0 archive with
 `SESSION_COST_EXPECT_ACTION=1`, `E2E_PORT_OFFSET=27`, `--workers=1`, and `--retries=0`.
+
+## Review corrections (2026-10-05)
+
+The report coordinator no longer joins a canceled process. Batch rejection
+results include all accepted models. Dated collection rotates through active
+and terminal dates. Historical import waits for the configured interval
+between dated reports and pages, and retains its pending-date checkpoint.
+Cancellation cannot overwrite an explicit cancelled state with failure.
+
+The command runner cancels descendants and bounds pipe cleanup. Windows uses
+Node/ICU to resolve the system IANA timezone. If Node is absent, set `TZ` to an
+IANA timezone. Dated writes fail when the source timezone cannot be resolved.
+
+Verification: the Go race suite, 17 bundle tests, vet, build, all-platform
+package checks, and package/release negative tests passed. Regression tests
+cover canceled report joining, complete rejected batches, dated scheduling,
+cancelled import state, resumed pending dates, interval waits, timezone/date
+alignment, and descendant shutdown. Documentation now names actual tests and
+describes ticker reconciliation instead of unimplemented lifecycle events.

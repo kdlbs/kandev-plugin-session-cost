@@ -122,8 +122,10 @@ Missing provider identity remains unknown. The adapter does not infer it from a 
 Historical import preserves the source-local date and timezone for monthly aggregation in core.
 The plugin does not calculate aggregate Cost/1M or render the native tables.
 
-`server/usage_test.go:TestUsagePreservesProviderIdentity` covers provider collisions and missing provider values.
-`server/import_test.go:TestImportPreservesDateCoverage` covers dated rows across month and timezone boundaries.
+`server/usage_test.go:TestHistoricalImportResumesAndPersistsUndatedUsage` verifies a source date for one imported session.
+`server/usage_test.go:TestRunDatedReportPassesInclusiveSourceDateBounds` verifies inclusive report date bounds.
+These tests do not cover provider collisions or month/timezone-boundary imports.
+The core work package owns aggregate provider and timezone coverage.
 These cases run through the existing `make test` commands in Tasks 01 and 04.
 They supply data for AC-COSTS-TOKEN-USAGE-004.8 through .12, owned by the core work package.
 
