@@ -1,3 +1,74 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const hostRoot = process.env.KANDEV_HOST_ROOT || fileURLToPath(new URL("../../kandev", import.meta.url));
+
+async function openQuickChatDialog(testPage, touch, expectAction, expect) {
+  await testPage.goto("/");
+  if (touch && expectAction) {
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
+  } else {
+    await testPage.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+Shift+q`);
+  }
+
+  const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  return dialog;
+}
+
+async function openNewQuickChatSetup(dialog, testPage, expect) {
+  const setup = dialog.getByTestId("quick-chat-setup");
+  if (!(await setup.isVisible({ timeout: 1_000 }).catch(() => false))) {
+    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+    await testPage.getByTestId("quick-chat-new-agent").click();
+  }
+  await expect(setup).toBeVisible({ timeout: 5_000 });
+  return setup;
+}
+
+async function waitForQuickChatAction(dialog, expect) {
+  await expect(dialog.getByRole("button", { name: "Session cost", exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+}
+
+async function attachBackendDiagnostics(backend, testInfo, testPage) {
+  if (testInfo && testPage) {
+    await testInfo.attach("quick-chat-start-failure.png", {
+      body: await testPage.screenshot(),
+      contentType: "image/png",
+    }).catch(() => undefined);
+  }
+  if (!backend || !testInfo) return;
+
+  const logPaths = [backend.logPath, path.join(backend.tmpDir, "backend-process.log")];
+  for (const [index, logPath] of logPaths.entries()) {
+    try {
+      if (!fs.statSync(logPath).isFile()) continue;
+      const contents = fs.readFileSync(logPath, "utf8");
+      await testInfo.attach(`backend-log-${index + 1}.txt`, {
+        body: contents.slice(-100_000),
+        contentType: "text/plain",
+      });
+    } catch {
+      // The backend may not have created this optional diagnostic file yet.
+    }
+  }
+}
+
+async function captureTaskComposerScreenshot(testPage, testInfo, touch) {
+  const filename = touch ? "v0.97.0-phone-task-composer.png" : "v0.97.0-desktop-task-composer.png";
+  const screenshot = await testPage.screenshot();
+  await testInfo.attach(filename, { body: screenshot, contentType: "image/png" });
+  const artifactDir = process.env.SESSION_COST_SMOKE_ARTIFACT_DIR;
+  if (artifactDir) {
+    fs.mkdirSync(artifactDir, { recursive: true });
+    fs.writeFileSync(path.join(artifactDir, filename), screenshot);
+  }
+}
+
 export async function runSessionCostHostSmoke({
   testPage,
   apiClient,
@@ -5,6 +76,8 @@ export async function runSessionCostHostSmoke({
   expectAction,
   touch,
   expect,
+  backend,
+  testInfo,
 }) {
   const packagePath = process.env.SESSION_COST_PACKAGE_PATH;
   if (!packagePath) throw new Error("Set SESSION_COST_PACKAGE_PATH to a built plugin archive.");
@@ -22,12 +95,6 @@ export async function runSessionCostHostSmoke({
     await expect(testPage.getByTestId("install-plugin-dialog")).toBeHidden({ timeout: 30_000 });
     await expect(testPage.getByTestId("plugin-row-kandev-session-cost")).toBeVisible();
     installed = true;
-
-    quickChat = await apiClient.startQuickChat(
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      "Session Cost action smoke",
-    );
 
     const fakeResponse = {
       found: true,
@@ -48,22 +115,94 @@ export async function runSessionCostHostSmoke({
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fakeResponse) });
     });
 
+    let dialog;
+    if (expectAction) {
+      dialog = await openQuickChatDialog(testPage, touch, expectAction, expect);
+      const setup = await openNewQuickChatSetup(dialog, testPage, expect);
+      const openingAction = setup.getByRole("button", { name: "Session cost", exact: true });
+      await expect(openingAction).toBeVisible();
+      await expect(openingAction).toHaveAttribute("id", "session-cost-action");
+      await expect(openingAction).toHaveAttribute("data-slot", "surface-action");
+      await expect(openingAction).toHaveAttribute("data-surface", "composer");
+      await expect(openingAction).toHaveAttribute("aria-label", "Session cost");
+
+      if (touch) {
+        const bounds = await openingAction.boundingBox();
+        expect(bounds).not.toBeNull();
+        expect(bounds.width).toBeGreaterThanOrEqual(44);
+        expect(bounds.height).toBeGreaterThanOrEqual(44);
+        await openingAction.tap();
+      } else {
+        await openingAction.focus();
+        await expect(openingAction).toBeFocused();
+        await openingAction.press("Enter");
+      }
+      await expect(openingAction).toHaveAttribute("aria-expanded", "true");
+      await testPage.keyboard.press("Escape");
+      await expect(openingAction).toHaveAttribute("aria-expanded", "false");
+
+      const { dwell } = await import(
+        pathToFileURL(path.join(hostRoot, "apps/web/e2e/helpers/causal-waits.ts")).href
+      );
+      await dwell(
+        testPage,
+        250,
+        "negative-assertion",
+        "the Quick Chat opening composer has no active session, so the cost action must not fetch usage",
+      );
+      expect(requests).toHaveLength(0);
+
+      const { selectAgentIfNeeded } = await import(
+        pathToFileURL(path.join(hostRoot, "apps/web/e2e/tests/chat/quick-chat-helpers.ts")).href
+      );
+      await selectAgentIfNeeded(dialog, testPage);
+      const startResponsePromise = testPage.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname.endsWith("/quick-chat") &&
+          response.request().method() === "POST",
+        { timeout: 30_000 },
+      );
+      await setup.getByTestId("task-description-input").fill("Session Cost action smoke");
+      const startButton = setup.getByTestId("quick-chat-send");
+      await expect(startButton).toBeEnabled({ timeout: 10_000 });
+      if (touch) await startButton.tap();
+      else await startButton.click();
+      const startResponse = await startResponsePromise;
+      const startBody = await startResponse.json();
+      if (!startResponse.ok() && testInfo) {
+        await testInfo.attach("quick-chat-start-response.json", {
+          body: JSON.stringify({ status: startResponse.status(), body: startBody }, null, 2),
+          contentType: "application/json",
+        });
+        await attachBackendDiagnostics(backend, testInfo, testPage);
+      }
+      if (!startBody.task_id || !startBody.session_id) {
+        throw new Error(`Quick Chat did not return a task and session identity: ${JSON.stringify(startBody)}`);
+      }
+      quickChat = { task_id: startBody.task_id, session_id: startBody.session_id };
+      await waitForQuickChatAction(dialog, expect);
+    } else {
+      quickChat = await apiClient.startQuickChat(
+        seedData.workspaceId,
+        seedData.agentProfileId,
+        "Session Cost action smoke",
+      );
+      dialog = await openQuickChatDialog(testPage, touch, expectAction, expect);
+    }
+
     const openQuickChat = async () => {
-      await testPage.goto("/");
-      await testPage.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+Shift+q`);
-      const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
-      await expect(dialog).toBeVisible({ timeout: 15_000 });
-      await expect(dialog.getByTestId("quick-chat-messages")).toBeVisible();
-      await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
-      return dialog;
+      return openQuickChatDialog(testPage, touch, expectAction, expect);
     };
 
-    const expectLegacyCoarseLayout = async (button) => {
+    const expectComposerGeometry = async (button) => {
       const layout = await button.evaluate((buttonElement) => {
-        const toolbar = buttonElement.closest('[data-testid="mobile-chat-input-toolbar"]');
+        const toolbar = buttonElement.closest(
+          '[data-testid="mobile-chat-input-toolbar"], [data-testid="chat-input-toolbar"]',
+        );
         const icon = buttonElement.querySelector("svg");
-        const amount = Array.from(buttonElement.querySelectorAll("span")).find((element) =>
-          element.textContent.includes("123"),
+        const amount = Array.from(buttonElement.querySelectorAll("*" )).find((element) =>
+          element.textContent.includes("123") &&
+          !Array.from(element.children).some((child) => child.textContent.includes("123")),
         );
         const rect = (element) => {
           const bounds = element.getBoundingClientRect();
@@ -83,19 +222,30 @@ export async function runSessionCostHostSmoke({
           toolbarFound: Boolean(toolbar),
           iconInsideButton: Boolean(iconBounds && contains(buttonBounds, iconBounds)),
           amountInsideButton: Boolean(amountBounds && contains(buttonBounds, amountBounds)),
+          amountTextFits: Boolean(amount && amount.scrollWidth <= amount.clientWidth + 1),
           buttonInsideToolbar: Boolean(toolbarBounds && contains(toolbarBounds, buttonBounds)),
           buttonWidth: buttonBounds.right - buttonBounds.left,
+          buttonHeight: buttonBounds.bottom - buttonBounds.top,
+          documentWidth: document.documentElement.scrollWidth,
+          documentClientWidth: document.documentElement.clientWidth,
         };
       });
 
       expect(layout.toolbarFound).toBe(true);
       expect(layout.iconInsideButton).toBe(true);
       expect(layout.amountInsideButton).toBe(true);
+      expect(layout.amountTextFits).toBe(true);
       expect(layout.buttonInsideToolbar).toBe(true);
-      expect(layout.buttonWidth).toBeGreaterThanOrEqual(44);
+      expect(layout.documentWidth).toBeLessThanOrEqual(layout.documentClientWidth);
+      if (touch) {
+        expect(layout.buttonWidth).toBeGreaterThanOrEqual(44);
+        expect(layout.buttonHeight).toBeGreaterThanOrEqual(44);
+      } else {
+        expect(layout.buttonHeight).toBeGreaterThanOrEqual(27);
+        expect(layout.buttonHeight).toBeLessThanOrEqual(29);
+      }
     };
 
-    const dialog = await openQuickChat();
     const action = dialog.getByRole("button", { name: "Session cost", exact: true });
     await expect(action).toBeVisible();
     await expect(action).toHaveAttribute("id", "session-cost-action");
@@ -123,7 +273,7 @@ export async function runSessionCostHostSmoke({
     expect(requests[0].active).toBe(quickChat.session_id);
     await expect(action).toContainText(/123.*456.*789/);
     await expect(action).toHaveAttribute("aria-label", "Session cost");
-    if (touch && !expectAction) await expectLegacyCoarseLayout(action);
+    await expectComposerGeometry(action);
 
     if (!touch) await action.press("Enter");
     await expect(action).toHaveAttribute("aria-expanded", "true");
@@ -183,7 +333,8 @@ export async function runSessionCostHostSmoke({
     expect(requests[2].taskId).toBe(quickChat.task_id);
     expect(requests[2].active).toBe(quickChat.session_id);
     await expect(taskChatAction).toContainText(/123.*456.*789/);
-    if (touch && !expectAction) await expectLegacyCoarseLayout(taskChatAction);
+    await expectComposerGeometry(taskChatAction);
+    if (testInfo) await captureTaskComposerScreenshot(testPage, testInfo, touch);
   } finally {
     if (installed) await apiClient.rawRequest("DELETE", "/api/plugins/kandev-session-cost").catch(() => undefined);
     if (quickChat?.task_id) await apiClient.deleteTask(quickChat.task_id).catch(() => undefined);

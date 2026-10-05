@@ -17,8 +17,18 @@ test.describe("Session Cost packaged action on a phone host", () => {
     testPage,
     apiClient,
     seedData,
-  }) => {
+    backend,
+  }, testInfo) => {
     test.setTimeout(240_000);
-    await runSessionCostHostSmoke({ testPage, apiClient, seedData, expectAction, touch: true, expect });
+    await runSessionCostHostSmoke({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      testInfo,
+      expectAction,
+      touch: true,
+      expect,
+    });
   });
 });

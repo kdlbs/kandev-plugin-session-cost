@@ -58,8 +58,9 @@ The Go and frontend SDK source pin is
 `570600439036e81f8e9e1c63f15c4abce8a6c846`, which includes host PR #3943 and
 `host.ui.Action`. This is a source revision, not a Kandev release number. The
 UI detects Action and retains the Button path for older hosts. The manifest
-does not declare a minimum Kandev version; validate the package against the
-stable host release you intend to run before publishing it.
+does not declare a minimum Kandev version. Packaged UI checks passed against
+Kandev `v0.97.0` and the older `v0.86.0` reference; these tested versions do not
+establish a declared support floor.
 
 ## Settings
 
@@ -148,6 +149,53 @@ For an older host checkout, set `KANDEV_HOST_ROOT` to its path and set
 `SESSION_COST_EXPECT_ACTION=0`. Build that host with the same commands first.
 The checked fallback reference is Kandev `v0.86.0`.
 
+The stable release check also uses this same package against Kandev `v0.97.0`
+([release](https://github.com/kdlbs/kandev/releases/tag/v0.97.0), source commit
+`e43881c7555372897b57ec51c705f1e05da43c40`). Verify the published Linux x64
+full-runtime archive with its `.sha256` file. Set `PLUGIN_ROOT` to this
+checkout, `HOST_ROOT` to a source checkout at that exact commit, `TASK_TMP` to
+a short task-owned temporary directory, and `E2E_RUNTIME` to a subdirectory of
+`TASK_TMP`. Build the release source's E2E web assets and `mock-agent` fixture
+(`pnpm install --frozen-lockfile`, `make build-web-e2e`, and
+`make -C apps/backend build-mock-agent`). `agentctl` looks for `mock-agent`
+beside the runtime executable, so copy the verified runtime to a disposable
+directory and add that fixture beside it; do not modify the downloaded
+release archive. For example:
+
+```sh
+mkdir -p "$TASK_TMP" "$E2E_RUNTIME"
+tar -xzf /path/to/kandev-linux-x64-full.tar.gz -C "$TASK_TMP"
+cp -a "$TASK_TMP/kandev/." "$E2E_RUNTIME/"
+cp "$HOST_ROOT/apps/backend/bin/mock-agent" "$E2E_RUNTIME/bin/mock-agent"
+chmod +x "$E2E_RUNTIME/bin/mock-agent"
+```
+
+Set `KANDEV_E2E_BIN` to `$E2E_RUNTIME/bin/kandev` and `KANDEV_HOST_ROOT` to
+`$HOST_ROOT`. Put `$E2E_RUNTIME/bin` first on `PATH`. Use isolated `HOME`, XDG
+data/config/cache directories, `TMPDIR`, and Playwright port offsets, and run
+the two projects separately with `--workers=1`:
+
+```sh
+mkdir -p "$TASK_TMP/home" "$TASK_TMP/config" "$TASK_TMP/data" \
+  "$TASK_TMP/cache" "$TASK_TMP/tmp" "$TASK_TMP/artifacts"
+
+env HOME="$TASK_TMP/home" XDG_CONFIG_HOME="$TASK_TMP/config" \
+  XDG_DATA_HOME="$TASK_TMP/data" XDG_CACHE_HOME="$TASK_TMP/cache" \
+  TMPDIR="$TASK_TMP/tmp" PATH="$E2E_RUNTIME/bin:$PATH" \
+  NODE_OPTIONS='--import=tsx' KANDEV_HOST_ROOT="$HOST_ROOT" \
+  KANDEV_E2E_BIN="$E2E_RUNTIME/bin/kandev" \
+  SESSION_COST_SMOKE_ARTIFACT_DIR="$TASK_TMP/artifacts" \
+  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.3.1.tar.gz" \
+  SESSION_COST_EXPECT_ACTION=1 E2E_PORT_OFFSET=22 \
+  pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs" \
+    --project=chromium --workers=1 --retries=0
+
+# Repeat with E2E_PORT_OFFSET=23 and --project=mobile-chrome.
+```
+
+Each successful run attaches and saves a task-composer screenshot under
+`$TASK_TMP/artifacts`.
+
 ## CI and releases
 
 Pull requests check module tidiness, Go formatting, vet, Go and UI tests, and
@@ -161,8 +209,10 @@ version before it pushes release metadata or a tag. A pushed tag must match the
 manifest, Makefile, and packaged manifest before the workflow publishes a
 GitHub Release with the archive and `checksums.txt`.
 
-Wait for a stable Kandev release that includes PR #3943. Validate the package
-against that release before you publish it.
+The stable-host validation condition for this package is met on Kandev `v0.97.0`,
+which includes PR #3943. Keep the package parked in its draft PR until the
+maintainer authorizes merge and the remaining overlapping plugin work is
+reconciled.
 
 ## License
 
