@@ -944,3 +944,17 @@ test("automatic polling stops at 130 elapsed seconds and aborts an in-flight pol
   assert.equal(view.refresh().props.disabled, false);
   assert.equal(view.pendingTimers(), 0);
 });
+
+test("localized Action keeps unpriced saved usage unavailable without a success tone", async () => {
+  const view = createActionHarness({ action: true, locale: "pt-pt" });
+  assert.equal(view.translations().en.importTitle, "Import historical usage");
+  view.trigger().props.onClick();
+  view.requests[0].resolve(costResponse({ cost: 0, cost_known: false, cache_write: 12, reasoning: 4, total: 36 }));
+  await flushPromises();
+  assert.equal(view.trigger().props.text, undefined);
+  assert.equal(view.trigger().props.tone, "neutral");
+  assert.match(view.text(), /Indisponível/);
+  assert.match(view.text(), /Escrita da cache12/);
+  assert.match(view.text(), /Raciocínio4/);
+  assert.doesNotMatch(view.text(), /\$0\.00/);
+});

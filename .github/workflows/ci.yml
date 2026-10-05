@@ -34,10 +34,6 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: kdlbs/kandev
-          # This plugin PR consumes the source-aware usage SDK from the
-          # matching core PR. Keep the two stacked heads aligned until core
-          # merges to main.
-          ref: feature/investigate-token-co-9dc
           path: kandev
           ref: ${{ steps.sdk.outputs.ref }}
           sparse-checkout: |

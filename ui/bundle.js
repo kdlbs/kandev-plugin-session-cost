@@ -33,6 +33,12 @@ var TRANSLATIONS = {
     input: "Input",
     output: "Output",
     cacheRead: "Cache read",
+    cacheWrite: "Cache write",
+    reasoning: "Reasoning",
+    total: "Total",
+    unavailable: "Unavailable",
+    savedAt: "Saved {{date}}",
+    refreshFailed: "Refresh failed: {{error}}",
     modelInput: "In {{count}}",
     modelOutput: "Out {{count}}",
     modelCacheRead: "Cache {{count}}",
@@ -54,6 +60,12 @@ var TRANSLATIONS = {
     input: "Entrada",
     output: "Saída",
     cacheRead: "Leitura da cache",
+    cacheWrite: "Escrita da cache",
+    reasoning: "Raciocínio",
+    total: "Total",
+    unavailable: "Indisponível",
+    savedAt: "Guardado em {{date}}",
+    refreshFailed: "A atualização falhou: {{error}}",
     modelInput: "Entrada {{count}}",
     modelOutput: "Saída {{count}}",
     modelCacheRead: "Cache {{count}}",
@@ -113,8 +125,8 @@ function fmtUSD(n, maxFrac) {
   return "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: maxFrac || 2 });
 }
 
-function costText(data, value, maxFrac) {
-  return data && data.cost_known === false ? "Unavailable" : fmtUSD(value, maxFrac);
+function costText(data, value, maxFrac, t) {
+  return data && data.cost_known === false ? translate(t, "unavailable") : fmtUSD(value, maxFrac);
 }
 
 // fmtCompact renders large token counts as 1.2K / 3.4M / 5.6B.
@@ -209,7 +221,7 @@ function costCard(h, d, t) {
     h(
       "div",
       { style: { fontSize: "22px", fontWeight: 700, lineHeight: 1.1, color: color, fontVariantNumeric: "tabular-nums" } },
-      costText(d, d.cost),
+      costText(d, d.cost, undefined, t),
     ),
   ];
 
@@ -283,7 +295,7 @@ function costCard(h, d, t) {
                   m.model,
                 ),
               ),
-              h("span", { style: { fontVariantNumeric: "tabular-nums" } }, costText(d, m.cost)),
+              h("span", { style: { fontVariantNumeric: "tabular-nums" } }, costText(d, m.cost, undefined, t)),
             ),
             h(
               "div",
@@ -543,8 +555,8 @@ function makeSessionCostAction(host) {
     }
 
     var loaded = visibleState.data || null;
-    var iconColor = loaded && loaded.found ? tierColor(loaded.cost, loaded.warn_threshold, loaded.high_threshold) : undefined;
-    var hasInlineCost = loaded && loaded.found && !(loaded.tokscale && loaded.tokscale.installed === false);
+    var iconColor = loaded && loaded.found && loaded.cost_known !== false ? tierColor(loaded.cost, loaded.warn_threshold, loaded.high_threshold) : undefined;
+    var hasInlineCost = loaded && loaded.found && loaded.cost_known !== false && !(loaded.tokscale && loaded.tokscale.installed === false);
 
     function onTriggerClick() {
       pinnedRef.current = stateMatchesActive ? !pinnedRef.current : true;
@@ -562,7 +574,7 @@ function makeSessionCostAction(host) {
             id: "session-cost-action",
             label: actionLabel,
             icon: coinsIcon(h, 16, iconColor),
-            text: loaded && loaded.found ? fmtUSD(loaded.cost) : undefined,
+            text: hasInlineCost ? fmtUSD(loaded.cost) : undefined,
             tone: actionTone,
             pressed: visiblePinned,
             tooltip: "",
