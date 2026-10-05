@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0] - 2026-10-05
+
+### Changed
+
+- Standardize session cost action and release checks (#11) (c88c73f)
+
+
 ## [0.3.1] - 2026-09-30
 
 ### Changed
