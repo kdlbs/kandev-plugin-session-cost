@@ -2,252 +2,117 @@ package main
 
 import (
 	"context"
-	"errors"
-	"log"
-	"os"
-	"os/exec"
 	"sync"
 	"time"
 )
 
-const (
-	defaultReportTimeout   = 120 * time.Second
-	defaultReportFreshness = 30 * time.Second
-	defaultFailureCooldown = 10 * time.Second
-	reportShutdownWait     = 3 * time.Second
-)
-
-const (
-	reportStateReady   = "ready"
-	reportStatePending = "pending"
-	reportStateFailed  = "failed"
-
-	reportErrorTimeout     = "timeout"
-	reportErrorUnavailable = "unavailable"
-	reportErrorFailed      = "failed"
-)
-
-type usageTotals struct {
-	Found     bool
-	Cost      float64
-	Input     int64
-	Output    int64
-	CacheRead int64
-	Turns     int64
-	Models    []sessionModel
-}
-
-type reportSnapshot struct {
-	generatedAt  time.Time
-	bySession    map[string]usageTotals
-	sessionOrder []string
-	tokscale     InstallStatus
-}
-
-type reportFailure struct {
-	code string
-	at   time.Time
-}
-
-type reportView struct {
-	state    string
-	errCode  string
-	stale    bool
-	snapshot *reportSnapshot
-}
-
 type reportCoordinator struct {
-	mu        sync.Mutex
-	ctx       context.Context
-	cancel    context.CancelFunc
-	getRunner func() runner
-	now       func() time.Time
-
-	timeout   time.Duration
-	freshness time.Duration
-	cooldown  time.Duration
-
-	active     bool
-	activeDone chan struct{}
-	snapshot   *reportSnapshot
-	failure    *reportFailure
-	closed     bool
+	mu       sync.Mutex
+	inFlight *reportCall
+	closed   bool
 }
 
-func newReportCoordinator(getRunner func() runner, now func() time.Time) *reportCoordinator {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &reportCoordinator{
-		ctx:       ctx,
-		cancel:    cancel,
-		getRunner: getRunner,
-		now:       now,
-		timeout:   defaultReportTimeout,
-		freshness: defaultReportFreshness,
-		cooldown:  defaultFailureCooldown,
-	}
+type reportCall struct {
+	done     chan struct{}
+	scope    string
+	entries  []sessionModelEntry
+	err      error
+	cancel   context.CancelFunc
+	waiters  int
+	finished bool
 }
 
-func (c *reportCoordinator) Request(cmd resolvedCommand, refresh bool) reportView {
-	now := c.now()
-	c.mu.Lock()
-	if !c.closed && !c.active && c.shouldStart(now, refresh) {
-		c.startLocked(cmd)
-	}
-
-	view := reportView{snapshot: c.snapshot}
-	switch {
-	case c.active:
-		view.state = reportStatePending
-		view.stale = c.snapshot != nil
-	case c.failure != nil:
-		view.state = reportStateFailed
-		view.errCode = c.failure.code
-		view.stale = c.snapshot != nil
-	case c.snapshot != nil:
-		view.state = reportStateReady
-	default:
-		view.state = reportStateFailed
-		view.errCode = reportErrorUnavailable
-	}
-	c.mu.Unlock()
-	return view
+func newReportCoordinator() *reportCoordinator {
+	return &reportCoordinator{}
 }
 
-func (c *reportCoordinator) shouldStart(now time.Time, refresh bool) bool {
-	if refresh {
-		return true
-	}
-	if c.failure != nil && now.Sub(c.failure.at) < c.cooldown {
-		return false
-	}
-	if c.snapshot == nil {
-		return true
-	}
-	return now.Sub(c.snapshot.generatedAt) >= c.freshness
+// run coalesces concurrent callers around one bounded tokscale process. Each
+// waiter may stop waiting without cancelling the shared process.
+func (c *reportCoordinator) run(ctx context.Context, cmd resolvedCommand, runner runner) ([]sessionModelEntry, error) {
+	return c.runScoped(ctx, cmd, "lifetime", runner)
 }
 
-func (c *reportCoordinator) startLocked(cmd resolvedCommand) {
-	c.active = true
-	c.failure = nil
-	done := make(chan struct{})
-	c.activeDone = done
-	ctx, cancel := context.WithTimeout(c.ctx, c.timeout)
-	run := c.getRunner()
-	started := c.now()
-	go func() {
-		defer cancel()
-		entries, err := runSessionModels(ctx, cmd, run)
-		if err == nil && ctx.Err() != nil {
-			err = ctx.Err()
-		}
-		finished := c.now()
-		var snapshot *reportSnapshot
-		var failure *reportFailure
-		if err != nil && !errors.Is(ctx.Err(), context.Canceled) {
-			failure = &reportFailure{code: classifyReportError(ctx, err), at: finished}
-			log.Printf("session-cost report failed: code=%s duration=%s", failure.code, finished.Sub(started).Round(time.Millisecond))
-		} else if err == nil {
-			snapshot = buildReportSnapshot(entries, cmd, finished)
-		}
-
+// runScoped serializes reports with different command scopes while allowing
+// callers for the same scope to share one result. A dated historical query
+// must never receive the lifetime report that happens to be in flight.
+func (c *reportCoordinator) runScoped(ctx context.Context, cmd resolvedCommand, scope string, runner runner, extraArgs ...string) ([]sessionModelEntry, error) {
+	for {
 		c.mu.Lock()
-		if !c.closed {
-			if failure != nil {
-				c.failure = failure
-			} else if snapshot != nil {
-				c.snapshot = snapshot
-				c.failure = nil
-			}
+		if c.closed {
+			c.mu.Unlock()
+			return nil, context.Canceled
 		}
-		c.active = false
-		c.activeDone = nil
-		close(done)
+		if c.inFlight == nil {
+			runCtx, cancel := context.WithTimeout(context.Background(), reportTimeout)
+			call := &reportCall{done: make(chan struct{}), scope: scope, cancel: cancel, waiters: 1}
+			c.inFlight = call
+			c.mu.Unlock()
+			go c.execute(call, runCtx, cmd, runner, extraArgs...)
+			return c.wait(ctx, call)
+		}
+		call := c.inFlight
+		if call.scope == scope && call.waiters > 0 {
+			call.waiters++
+			c.mu.Unlock()
+			return c.wait(ctx, call)
+		}
 		c.mu.Unlock()
-	}()
+		select {
+		case <-call.done:
+			// A different scope finished. Loop so this caller starts its
+			// own report while preserving the one-process invariant.
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }
 
+func (c *reportCoordinator) execute(call *reportCall, runCtx context.Context, cmd resolvedCommand, runner runner, extraArgs ...string) {
+	call.entries, call.err = runSessionModels(runCtx, cmd, runner, extraArgs...)
+	call.cancel()
+	c.mu.Lock()
+	call.finished = true
+	if c.inFlight == call {
+		c.inFlight = nil
+	}
+	close(call.done)
+	c.mu.Unlock()
+}
+
+func (c *reportCoordinator) wait(ctx context.Context, call *reportCall) ([]sessionModelEntry, error) {
+	select {
+	case <-call.done:
+		return call.entries, call.err
+	case <-ctx.Done():
+		c.mu.Lock()
+		if call.waiters > 0 {
+			call.waiters--
+		}
+		if call.waiters == 0 && !call.finished {
+			call.cancel()
+		}
+		c.mu.Unlock()
+		return nil, ctx.Err()
+	}
+}
+
+// Close drains the actual shared subprocess, including collector/import work,
+// before the plugin signal handler exits.
 func (c *reportCoordinator) Close() {
 	c.mu.Lock()
-	if !c.closed {
-		c.closed = true
-		c.cancel()
+	c.closed = true
+	call := c.inFlight
+	if call != nil {
+		call.cancel()
 	}
-	done := c.activeDone
 	c.mu.Unlock()
-	if done == nil {
+	if call == nil {
 		return
 	}
+	timer := time.NewTimer(reportShutdownWait)
+	defer timer.Stop()
 	select {
-	case <-done:
-	case <-time.After(reportShutdownWait):
-		log.Printf("session-cost report shutdown exceeded %s", reportShutdownWait)
+	case <-call.done:
+	case <-timer.C:
 	}
-}
-
-func classifyReportError(ctx context.Context, err error) string {
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
-		return reportErrorTimeout
-	}
-	if errors.Is(err, exec.ErrNotFound) {
-		return reportErrorUnavailable
-	}
-	var pathErr *os.PathError
-	if errors.As(err, &pathErr) {
-		return reportErrorUnavailable
-	}
-	return reportErrorFailed
-}
-
-func buildReportSnapshot(entries []sessionModelEntry, cmd resolvedCommand, generatedAt time.Time) *reportSnapshot {
-	snapshot := &reportSnapshot{
-		generatedAt: generatedAt,
-		bySession:   make(map[string]usageTotals),
-		tokscale: InstallStatus{
-			Command:   commandDisplay(cmd),
-			Source:    cmd.Source,
-			Installed: true,
-		},
-	}
-	for _, entry := range entries {
-		totals, exists := snapshot.bySession[entry.SessionID]
-		if !exists {
-			snapshot.sessionOrder = append(snapshot.sessionOrder, entry.SessionID)
-		}
-		totals.Found = true
-		totals.Cost += entry.Cost
-		totals.Input += entry.Input
-		totals.Output += entry.Output
-		totals.CacheRead += entry.CacheRead
-		totals.Turns += entry.MessageCount
-		totals.Models = append(totals.Models, sessionModel{
-			Model:     entry.Model,
-			Input:     entry.Input,
-			Output:    entry.Output,
-			CacheRead: entry.CacheRead,
-			Cost:      entry.Cost,
-		})
-		snapshot.bySession[entry.SessionID] = totals
-	}
-	return snapshot
-}
-
-func (s *reportSnapshot) usageFor(acpSessionID string) usageTotals {
-	var usage usageTotals
-	for _, sessionID := range s.sessionOrder {
-		totals := s.bySession[sessionID]
-		if !sessionMatches(sessionID, acpSessionID) {
-			continue
-		}
-		usage.Found = true
-		usage.Cost += totals.Cost
-		usage.Input += totals.Input
-		usage.Output += totals.Output
-		usage.CacheRead += totals.CacheRead
-		usage.Turns += totals.Turns
-		usage.Models = append(usage.Models, totals.Models...)
-	}
-	if usage.Models == nil {
-		usage.Models = []sessionModel{}
-	}
-	return usage
 }

@@ -1,7 +1,7 @@
 .PHONY: build test fmt check-format vet package package-host package-file verify-package verify-package-host clean
 
 BIN := bin/kandev-session-cost
-VERSION := 0.4.1
+VERSION := 0.5.0
 STAGE := .build/stage
 PKG_OUT := kandev-session-cost-$(VERSION).tar.gz
 KANDEV_SDK := ../kandev/apps/backend
@@ -14,7 +14,7 @@ build:
 ## Run Go, browser-bundle, package-verifier, and release-version checks.
 test:
 	go test ./server/...
-	node --test test/bundle.test.mjs
+	node --test test/*.test.mjs
 	node --check ui/bundle.js
 	sh scripts/test-verify-package.sh
 	sh scripts/test-verify-release-version.sh

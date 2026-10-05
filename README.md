@@ -28,21 +28,22 @@ Settings are generated from `manifest.yaml`:
   changes. On hosts with `host.ui.Action`, the host owns the action's size,
   spacing, focus style, and icon box. Hosts without Action use the plugin's
   existing Button fallback.
-- Pinned details show the total, cost per turn, input/output/cache-read token
-  totals, and per-model costs and token counts. Click or tap the action again,
-  click outside, or press Escape to close them.
-- Refresh is available while details are pinned. It recalculates the active
-  session once and remains disabled until the request finishes.
-- The backend uses one report worker for all sessions. A new lookup returns a
-  progress state while tokscale scans transcripts. The backend keeps the last
-  successful report in memory for 30 seconds.
-- While a report runs, details keep the last successful cost and mark it as a
-  previous result. A report or request error shows translated recovery text and
-  a retry action.
-- The browser requests status every two seconds while details stay open. It
-  stops polling after 130 seconds. Each request has a 10-second timeout.
-- The backend stops its report worker and child processes when the plugin stops.
-  It does not start a report when the active session has no ACP transcript.
+- Pinned details show the total cost, cost per turn, and token counts for input,
+  output, cache reads, cache writes, and reasoning. They also show each model
+  and its cost. Click or tap the action again, click outside, or press Escape
+  to close the details.
+- Optional statistics collection is disabled by default. When enabled, it
+  saves measurements every five minutes (minimum one minute). The settings
+  card offers an explicit, resumable historical import using dated buckets.
+- Saved canonical usage loads before an explicit refresh. Unknown cost remains
+  unavailable rather than appearing as zero.
+- Refresh is available while details are pinned. Reports run in the background
+  and share one subprocess with collection and import. Details poll every two
+  seconds, retain previous values on failure, and stop polling after 130 seconds.
+  Closing details cancels the browser request; reopening reads saved usage again.
+  Each request has a ten-second timeout. Reports cache successful data for
+  thirty seconds. Shutdown cancels and drains the shared subprocess. Sessions
+  without a transcript do not start a report.
 - The total changes from green to amber at `warn_threshold` and to red at
   `high_threshold`.
 - The backend maps the Kandev session ID to the agent transcript ID. The UI
@@ -55,8 +56,9 @@ API. English is the fallback; Portuguese (Portugal) is also included.
 ## Requirements and permissions
 
 The manifest uses plugin API v1 and requests read-only access to Kandev
-sessions (`api_read: ["sessions"]`). It does not request credentials or write
-access. The plugin runs tokscale on the machine hosting the Kandev plugin
+sessions, tasks, and saved usage (`api_read: ["sessions", "tasks", "session_usage"]`),
+usage writes (`api_write: ["session_usage"]`), and durable state. It does not
+request credentials. The plugin runs tokscale on the machine that hosts its
 backend, so tokscale must be installed there or available through the configured
 command.
 
@@ -65,8 +67,8 @@ arm64, and Windows amd64. The UI uses the host's React instance and does not
 bundle a second React runtime.
 
 The Go and frontend SDK source pin is
-`570600439036e81f8e9e1c63f15c4abce8a6c846`, which includes host PR #3943 and
-`host.ui.Action`. This is a source revision, not a Kandev release number. The
+`2e5fe80abddf8920f085b4828ff782b25aa5885e`. This includes core token usage
+PR #3660 and `host.ui.Action` from host PR #3943. This is a source revision, not a Kandev release number. The
 UI detects Action and retains the Button path for older hosts. The manifest
 does not declare a minimum Kandev version. Packaged UI checks passed against
 Kandev `v0.97.0` and the older `v0.86.0` reference; these tested versions do not
@@ -82,6 +84,9 @@ Open **Settings → Plugins → Session Cost**:
   Its default is 1.
 - `high_threshold` is the USD amount at which the displayed total turns red.
   Its default is 10.
+- `collect_statistics` enables collection. Its default is false.
+- `collection_interval_minutes` sets the interval. Its default is 5 and its
+  minimum is 1. Historical import requires collection to be enabled.
 
 ## Install
 
@@ -90,7 +95,7 @@ Plugins → Install plugin**. You can also install the local package through the
 plugin API:
 
 ```sh
-curl -F package=@kandev-session-cost-0.4.1.tar.gz http://localhost:8080/api/plugins/install
+curl -F package=@kandev-session-cost-0.5.0.tar.gz http://localhost:8080/api/plugins/install
 ```
 
 ## Develop and verify
@@ -101,7 +106,7 @@ for this plugin worktree and pin it to the source revision above:
 
 ```sh
 git clone --filter=blob:none https://github.com/kdlbs/kandev.git ../kandev
-git -C ../kandev checkout --detach 570600439036e81f8e9e1c63f15c4abce8a6c846
+git -C ../kandev checkout --detach 2e5fe80abddf8920f085b4828ff782b25aa5885e
 ```
 
 Do not point the module replacement at a floating branch. The host checkout is
@@ -130,8 +135,8 @@ checks all five declared platforms, the UI bundle, manifest identity, exact
 file inventory, and checksums. `make package-host` and `make package` create
 the corresponding archives without the additional verification step.
 
-The UI has no build step or npm dependencies. The UI bundle unit tests use
-mocked fetch responses. They do not run tokscale or read an agent database.
+The UI has no build step or npm dependencies. The UI tests use fake webhook
+data. They do not run tokscale or read a real agent database.
 
 ## Packaged browser smoke test
 
@@ -144,16 +149,13 @@ HOST_ROOT=$PLUGIN_ROOT/../kandev
 (cd "$HOST_ROOT/apps" && pnpm install --frozen-lockfile)
 ```
 
-Run both desktop and phone checks against the package.
-
-The tests install the archive through the host UI. Each test uses a temporary
-tokscale command. The command blocks, returns fixture data, and fails once.
-The browser calls the installed webhook and checks its recovery states.
+Run both desktop and phone checks against the package. The tests install the
+archive through the host UI and use fake cost data:
 
 ```sh
 (cd "$HOST_ROOT/apps/web" && \
   NODE_OPTIONS='--import=tsx' \
-  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.4.1.tar.gz" \
+  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.5.0.tar.gz" \
   SESSION_COST_EXPECT_ACTION=1 \
   pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs")
 ```
@@ -198,7 +200,7 @@ env HOME="$TASK_TMP/home" XDG_CONFIG_HOME="$TASK_TMP/config" \
   NODE_OPTIONS='--import=tsx' KANDEV_HOST_ROOT="$HOST_ROOT" \
   KANDEV_E2E_BIN="$E2E_RUNTIME/bin/kandev" \
   SESSION_COST_SMOKE_ARTIFACT_DIR="$TASK_TMP/artifacts" \
-  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.4.1.tar.gz" \
+  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.5.0.tar.gz" \
   SESSION_COST_EXPECT_ACTION=1 E2E_PORT_OFFSET=22 \
   pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs" \
     --project=chromium --workers=1 --retries=0
@@ -222,10 +224,9 @@ version before it pushes release metadata or a tag. A pushed tag must match the
 manifest, Makefile, and packaged manifest before the workflow publishes a
 GitHub Release with the archive and `checksums.txt`.
 
-The stable-host validation condition for this package is met on Kandev `v0.97.0`,
-which includes PR #3943. Keep the package parked in its draft PR until the
-maintainer authorizes merge and the remaining overlapping plugin work is
-reconciled.
+The statistics APIs require core PR #3660. The earlier stable-host smoke
+checks covered the toolbar Action contract; they do not establish support for
+the new collection and saved-usage APIs. Merge the core dependency before this PR.
 
 ## License
 

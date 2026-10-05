@@ -22,15 +22,38 @@ import (
 type fakeHost struct {
 	pluginsdk.UnimplementedHostData
 	config     map[string]any
-	sessions   []pluginsdk.Session
 	configFn   func(context.Context) (map[string]any, error)
 	sessionsFn func(context.Context, pluginsdk.SessionFilter, pluginsdk.Page) ([]pluginsdk.Session, error)
+	sessions   []pluginsdk.Session
+	stateMu    sync.Mutex
+	state      map[string]map[string]any
 }
 
-func (h *fakeHost) GetState(context.Context, string, string, string) (map[string]any, bool, error) {
-	return nil, false, nil
+func (h *fakeHost) GetState(_ context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
+	h.stateMu.Lock()
+	defer h.stateMu.Unlock()
+	value, found := h.state[scope+"\x00"+scopeID+"\x00"+key]
+	if !found {
+		return nil, false, nil
+	}
+	copy := make(map[string]any, len(value))
+	for name, item := range value {
+		copy[name] = item
+	}
+	return copy, true, nil
 }
-func (h *fakeHost) SetState(context.Context, string, string, string, map[string]any) error {
+
+func (h *fakeHost) SetState(_ context.Context, scope, scopeID, key string, value map[string]any) error {
+	h.stateMu.Lock()
+	defer h.stateMu.Unlock()
+	if h.state == nil {
+		h.state = make(map[string]map[string]any)
+	}
+	copy := make(map[string]any, len(value))
+	for name, item := range value {
+		copy[name] = item
+	}
+	h.state[scope+"\x00"+scopeID+"\x00"+key] = copy
 	return nil
 }
 func (h *fakeHost) DeleteState(context.Context, string, string, string) error { return nil }
@@ -55,18 +78,18 @@ func (h *fakeHost) DeleteSecret(context.Context, string) error              { re
 func (h *fakeHost) EmitEvent(context.Context, string, map[string]any) error { return nil }
 
 func (h *fakeHost) Sessions() pluginsdk.SessionReader {
-	return fakeSessionReader{sessions: h.sessions, list: h.sessionsFn}
+	return fakeSessionReader{sessions: h.sessions, listFn: h.sessionsFn}
 }
 
 type fakeSessionReader struct {
+	listFn   func(context.Context, pluginsdk.SessionFilter, pluginsdk.Page) ([]pluginsdk.Session, error)
 	sessions []pluginsdk.Session
-	list     func(context.Context, pluginsdk.SessionFilter, pluginsdk.Page) ([]pluginsdk.Session, error)
 }
 
 func (r fakeSessionReader) List(ctx context.Context, filter pluginsdk.SessionFilter, page pluginsdk.Page) ([]pluginsdk.Session, *pluginsdk.PageInfo, error) {
-	if r.list != nil {
-		sessions, err := r.list(ctx, filter, page)
-		return sessions, nil, err
+	if r.listFn != nil {
+		items, err := r.listFn(ctx, filter, page)
+		return items, nil, err
 	}
 	return r.sessions, nil, nil
 }
@@ -103,7 +126,7 @@ func modelsRunner(modelsOut []byte, modelsErr error) runner {
 const sampleSessionJSON = `{"entries":[
   {"sessionId":"abc-123","model":"claude-opus-4-8","input":1000,"output":500,"cacheRead":200,"messageCount":4,"cost":1.25},
   {"sessionId":"abc-123","model":"claude-haiku-4-5","input":50,"output":20,"cacheRead":0,"messageCount":1,"cost":0.05},
-  {"sessionId":"unrelated","model":"x","input":0,"output":0,"cacheRead":0,"messageCount":0,"cost":9.9}
+  {"sessionId":"unrelated","model":"x","cost":9.9}
 ]}`
 
 func session(id, acp string) pluginsdk.Session {
@@ -119,9 +142,9 @@ func decode(t *testing.T, body []byte) sessionCostResponse {
 
 func waitForReport(t *testing.T, p *plugin) {
 	t.Helper()
-	p.reports.mu.Lock()
-	done := p.reports.activeDone
-	p.reports.mu.Unlock()
+	p.toolbar.mu.Lock()
+	done := p.toolbar.activeDone
+	p.toolbar.mu.Unlock()
 	if done == nil {
 		return
 	}
@@ -358,7 +381,7 @@ func TestHandleWebhook_RefreshFailureRetainsSnapshotAndExplicitRetryRecovers(t *
 		}
 	}
 	p := newTestPlugin(nil, []pluginsdk.Session{session("one", "abc-123")}, run)
-	p.reports.cooldown = time.Hour
+	p.toolbar.cooldown = time.Hour
 	defer p.Close()
 
 	_, first := callReadyWebhook(t, p, "task_id=task-1&active=one")
@@ -414,7 +437,7 @@ func TestHandleWebhook_ColdFailuresAndInvalidOutputAreRetryable(t *testing.T) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		})
-		p.reports.timeout = 20 * time.Millisecond
+		p.toolbar.timeout = 20 * time.Millisecond
 		defer p.Close()
 		_, failed := callReadyWebhook(t, p, "task_id=task-1&active=one")
 		require.Equal(t, reportStateFailed, failed.ReportState)

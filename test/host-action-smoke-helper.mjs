@@ -195,11 +195,13 @@ export async function runSessionCostHostSmoke({
     const requests = [];
     testPage.on("request", (request) => {
       const requestUrl = new URL(request.url());
-      if (!requestUrl.pathname.endsWith("/webhooks/session-cost")) return;
+      const action = requestUrl.pathname.endsWith("/actions/session-usage");
+      if (!action && !requestUrl.pathname.endsWith("/webhooks/session-cost")) return;
+      const payload = action ? request.postDataJSON() : null;
       requests.push({
-        taskId: requestUrl.searchParams.get("task_id"),
-        active: requestUrl.searchParams.get("active"),
-        refresh: requestUrl.searchParams.get("refresh") === "1",
+        taskId: action ? payload?.taskId : requestUrl.searchParams.get("task_id"),
+        active: action ? payload?.sessionId : requestUrl.searchParams.get("active"),
+        refresh: action ? Boolean(payload?.body?.refresh) : requestUrl.searchParams.get("refresh") === "1",
       });
     });
 
@@ -207,8 +209,37 @@ export async function runSessionCostHostSmoke({
     if (expectAction) {
       dialog = await openQuickChatDialog(testPage, touch, expectAction, expect);
       const setup = await openNewQuickChatSetup(dialog, testPage, expect);
-      const startButton = setup.getByTestId("quick-chat-start");
+      const openingAction = setup.getByRole("button", { name: "Session cost", exact: true });
+      await expect(openingAction).toBeVisible();
+      await expect(openingAction).toHaveAttribute("id", "session-cost-action");
+      await expect(openingAction).toHaveAttribute("data-slot", "surface-action");
+      await expect(openingAction).toHaveAttribute("data-surface", "composer");
+      await expect(openingAction).toHaveAttribute("aria-label", "Session cost");
+      const startButton = setup.getByTestId("quick-chat-send");
+      // The host sends disabled=true to plugin actions while this empty
+      // opening composer cannot submit. Session Cost remains an independent,
+      // read-only action that explains there is no active session to load.
       await expect(startButton).toBeDisabled();
+      await expect(openingAction).toBeEnabled();
+
+      if (touch) {
+        const bounds = await waitForTouchTarget(openingAction, expect);
+        expect(bounds).not.toBeNull();
+        await openingAction.tap();
+      } else {
+        await openingAction.focus();
+        await expect(openingAction).toBeFocused();
+        await openingAction.press("Enter");
+      }
+      await expect(openingAction).toHaveAttribute("aria-expanded", "true");
+      await expect(
+        testPage
+          .locator('[data-slot="tooltip-content"]:visible')
+          .getByText("Open to load session cost", { exact: true })
+          .first(),
+      ).toBeVisible();
+      await testPage.keyboard.press("Escape");
+      await expect(openingAction).toHaveAttribute("aria-expanded", "false");
 
       const { dwell } = await import(
         pathToFileURL(path.join(hostRoot, "apps/web/e2e/helpers/causal-waits.ts")).href
@@ -217,7 +248,7 @@ export async function runSessionCostHostSmoke({
         testPage,
         250,
         "negative-assertion",
-        "the Quick Chat setup has no active session or composer action, so Session Cost must not request usage",
+        "the Quick Chat opening composer has no active session, so the cost action must not fetch usage",
       );
       expect(requests).toHaveLength(0);
 
@@ -225,12 +256,17 @@ export async function runSessionCostHostSmoke({
         pathToFileURL(path.join(hostRoot, "apps/web/e2e/tests/chat/quick-chat-helpers.ts")).href
       );
       await selectAgentIfNeeded(dialog, testPage);
+      // A selected profile still cannot submit an empty prompt. Check that the
+      // host's composer-disabled state does not disable this read-only action.
+      await expect(startButton).toBeDisabled();
+      await expect(openingAction).toBeEnabled();
       const startResponsePromise = testPage.waitForResponse(
         (response) =>
           new URL(response.url()).pathname.endsWith("/quick-chat") &&
           response.request().method() === "POST",
         { timeout: 30_000 },
       );
+      await setup.getByTestId("task-description-input").fill("Session Cost action smoke");
       await expect(startButton).toBeEnabled({ timeout: 10_000 });
       if (touch) await startButton.tap();
       else await startButton.click();

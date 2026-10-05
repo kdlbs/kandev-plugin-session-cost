@@ -15,16 +15,13 @@ var COLOR = {
   red: "#ef4444",
   accent: "#6366f1",
 };
+// Per-model dot palette, cycled by a stable hash of the model name.
 var POLL_INTERVAL_MS = 2000;
 var POLL_TIMEOUT_MS = 130000;
-// Per-model dot palette, cycled by a stable hash of the model name.
 var MODEL_DOTS = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#f43f5e"];
 
 var TRANSLATIONS = {
   en: {
-    actionLabel: "Session cost",
-    calculatingCost: "Calculating cost…",
-    loadCostError: "Couldn't load cost: {{error}}",
     requestFailed: "Couldn't load or refresh cost. Try again.",
     updateFailed: "Couldn't refresh cost. Showing the previous result. Try again.",
     reportFailed: "Couldn't update cost. Try again.",
@@ -35,6 +32,9 @@ var TRANSLATIONS = {
     pollingTimeout: "Cost calculation is taking too long. Refresh to try again.",
     pollingTimeoutPrevious: "Cost calculation is taking too long. Showing the previous result. Refresh to try again.",
     requestTimeout: "The session cost request took too long. Try again.",
+    actionLabel: "Session cost",
+    calculatingCost: "Calculating cost…",
+    loadCostError: "Couldn't load cost: {{error}}",
     openToLoadCost: "Open to load session cost",
     tokscaleUnavailable: "tokscale isn't available — set its command in Settings → Plugins → Session Cost.",
     noAgentTranscript: "No agent transcript for this session yet — run the agent first.",
@@ -45,6 +45,12 @@ var TRANSLATIONS = {
     input: "Input",
     output: "Output",
     cacheRead: "Cache read",
+    cacheWrite: "Cache write",
+    reasoning: "Reasoning",
+    total: "Total",
+    unavailable: "Unavailable",
+    savedAt: "Saved {{date}}",
+    refreshFailed: "Refresh failed: {{error}}",
     modelInput: "In {{count}}",
     modelOutput: "Out {{count}}",
     modelCacheRead: "Cache {{count}}",
@@ -53,9 +59,6 @@ var TRANSLATIONS = {
     refresh: "Refresh",
   },
   "pt-pt": {
-    actionLabel: "Custo da sessão",
-    calculatingCost: "A calcular o custo…",
-    loadCostError: "Não foi possível carregar o custo: {{error}}",
     requestFailed: "Não foi possível carregar ou atualizar o custo. Tente novamente.",
     updateFailed: "Não foi possível atualizar o custo. A mostrar o resultado anterior. Tente novamente.",
     reportFailed: "Não foi possível atualizar o custo. Tente novamente.",
@@ -66,6 +69,9 @@ var TRANSLATIONS = {
     pollingTimeout: "O cálculo do custo está a demorar demasiado. Atualize para tentar novamente.",
     pollingTimeoutPrevious: "O cálculo do custo está a demorar demasiado. A mostrar o resultado anterior. Atualize para tentar novamente.",
     requestTimeout: "O pedido do custo da sessão demorou demasiado. Tente novamente.",
+    actionLabel: "Custo da sessão",
+    calculatingCost: "A calcular o custo…",
+    loadCostError: "Não foi possível carregar o custo: {{error}}",
     openToLoadCost: "Abra para carregar o custo da sessão",
     tokscaleUnavailable: "tokscale não está disponível — defina o comando em Definições → Plugins → Session Cost.",
     noAgentTranscript: "Ainda não existe uma transcrição do agente para esta sessão — execute o agente primeiro.",
@@ -76,6 +82,12 @@ var TRANSLATIONS = {
     input: "Entrada",
     output: "Saída",
     cacheRead: "Leitura da cache",
+    cacheWrite: "Escrita da cache",
+    reasoning: "Raciocínio",
+    total: "Total",
+    unavailable: "Indisponível",
+    savedAt: "Guardado em {{date}}",
+    refreshFailed: "A atualização falhou: {{error}}",
     modelInput: "Entrada {{count}}",
     modelOutput: "Saída {{count}}",
     modelCacheRead: "Cache {{count}}",
@@ -133,6 +145,10 @@ function dotColor(model) {
 function fmtUSD(n, maxFrac) {
   var v = typeof n === "number" && isFinite(n) ? n : 0;
   return "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: maxFrac || 2 });
+}
+
+function costText(data, value, maxFrac, t) {
+  return data && data.cost_known === false ? translate(t, "unavailable") : fmtUSD(value, maxFrac);
 }
 
 // fmtCompact renders large token counts as 1.2K / 3.4M / 5.6B.
@@ -212,49 +228,29 @@ function divider(h) {
 function stateShell(h, header, body) {
   return h(
     "div",
-    {
-      style: {
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-        minWidth: 0,
-        maxWidth: "min(90vw, 360px)",
-        overflowWrap: "anywhere",
-      },
-    },
+    { style: { display: "flex", flexDirection: "column", gap: "6px", minWidth: "170px" } },
     header,
     h("div", { style: { fontSize: "12px", opacity: 0.75, lineHeight: 1.35 } }, body),
   );
 }
 
 function costCard(h, d, t, status) {
-  var color = tierColor(d.cost, d.warn_threshold, d.high_threshold);
+  var costKnown = d.cost_known !== false;
+  var color = costKnown ? tierColor(d.cost, d.warn_threshold, d.high_threshold) : undefined;
   var rows = [
     headerRow(h, t),
-  ];
-  if (status) {
-    rows.push(
-      h(
-        "div",
-        {
-          role: "status",
-          style: { fontSize: "11px", opacity: 0.75, lineHeight: 1.35, overflowWrap: "anywhere" },
-        },
-        status,
-      ),
-    );
-  }
-  rows.push(
     // Headline amount, coloured by spend tier.
     h(
       "div",
       { style: { fontSize: "22px", fontWeight: 700, lineHeight: 1.1, color: color, fontVariantNumeric: "tabular-nums" } },
-      fmtUSD(d.cost),
+      costText(d, d.cost, undefined, t),
     ),
-  );
+  ];
+
+  if (status) rows.push(h("div", {style: {fontSize: "11px"}}, status));
 
   // Cost / turn — the headline secondary metric, computed server-side.
-  if (d.turns > 0) {
+  if (costKnown && d.turns > 0) {
     rows.push(
       h(
         "div",
@@ -285,6 +281,9 @@ function costCard(h, d, t, status) {
       statRow(h, translate(t, "input"), fmtCompact(d.input)),
       statRow(h, translate(t, "output"), fmtCompact(d.output)),
       statRow(h, translate(t, "cacheRead"), fmtCompact(d.cache_read)),
+      statRow(h, translate(t, "cacheWrite"), fmtCompact(d.cache_write)),
+      statRow(h, translate(t, "reasoning"), fmtCompact(d.reasoning)),
+      statRow(h, translate(t, "total"), fmtCompact(d.total)),
     ),
   );
 
@@ -320,7 +319,7 @@ function costCard(h, d, t, status) {
                   m.model,
                 ),
               ),
-              h("span", { style: { fontVariantNumeric: "tabular-nums" } }, fmtUSD(m.cost)),
+              h("span", { style: { fontVariantNumeric: "tabular-nums" } }, costText(d, m.cost, undefined, t)),
             ),
             h(
               "div",
@@ -362,21 +361,66 @@ function costCard(h, d, t, status) {
 
   return h(
     "div",
-    {
-      style: {
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-        minWidth: "min(190px, 80vw)",
-        maxWidth: "min(90vw, 360px)",
-        overflowWrap: "anywhere",
-      },
-    },
+    { style: { display: "flex", flexDirection: "column", gap: "6px", minWidth: "190px" } },
     rows,
   );
 }
 
 // tooltipBody renders the popover contents for the current fetch state.
+function savedTooltipBody(h, ui, state, t) {
+  var header = headerRow(h, t);
+  if (state.loading && state.data) {
+    return h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+      costCard(h, state.data, t),
+      h("div", { style: { fontSize: "11px", opacity: 0.7 } }, translate(t, "refreshingCost")),
+    );
+  }
+  if (state.loading) {
+    return stateShell(
+      h,
+      header,
+      h(
+        "span",
+        { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+        ui.Spinner ? h(ui.Spinner, { style: { width: "13px", height: "13px" } }) : null,
+        translate(t, "calculatingCost"),
+      ),
+    );
+  }
+  if (state.error && state.data) {
+    return h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+      costCard(h, state.data, t),
+      h(
+        "div",
+        { style: { fontSize: "11px", color: COLOR.red } },
+        translate(t, state.data.found ? "refreshFailed" : "loadCostError", { values: { error: state.error } }),
+      ),
+    );
+  }
+  if (state.error) return stateShell(h, header, translate(t, "loadCostError", { values: { error: state.error } }));
+  var d = state.data;
+  if (!d) return stateShell(h, header, translate(t, "openToLoadCost"));
+  if (d.tokscale && d.tokscale.installed === false) {
+    return stateShell(h, header, translate(t, "tokscaleUnavailable"));
+  }
+  if (!d.acp_session_id) return stateShell(h, header, translate(t, "noAgentTranscript"));
+  if (!d.found) return stateShell(h, header, translate(t, "noRecordedUsage"));
+  return h(
+    "div",
+    { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+    costCard(h, d, t),
+    d.last_refresh
+      ? h("div", { style: { fontSize: "10px", opacity: 0.65 } }, translate(t, "savedAt", { values: { date: d.last_refresh } }))
+      : null,
+    d.error ? h("div", { style: { fontSize: "11px", color: COLOR.red } }, translate(t, "refreshFailed", { values: { error: d.error } })) : null,
+  );
+}
+
+
 function tooltipBody(h, ui, state, t) {
   var header = headerRow(h, t);
   var d = state.data;
@@ -426,13 +470,13 @@ function tooltipBody(h, ui, state, t) {
     return stateShell(h, header, translate(t, "tokscaleUnavailable"));
   }
   if (!d.found) return stateShell(h, header, translate(t, "noRecordedUsage"));
-  return costCard(h, d, t, state.stale || d.stale ? translate(t, "previousResult") : null);
+  return savedTooltipBody(h, ui, state, t);
 }
 
 // inlineCost is the small coloured amount shown next to the icon once loaded,
 // so the chat bar "says the cost" without needing to open the popover.
 function inlineCost(h, d) {
-  if (!d || !d.found || (d.tokscale && d.tokscale.installed === false)) return null;
+  if (!d || !d.found || d.cost_known === false || (d.tokscale && d.tokscale.installed === false)) return null;
   return h(
     "span",
     {
@@ -695,7 +739,9 @@ function makeSessionCostAction(host) {
       var fetchOptions = controller ? { signal: controller.signal } : undefined;
       var fetchPromise;
       try {
-        fetchPromise = host.api.fetch(qs, fetchOptions);
+        fetchPromise = host.api.invokeAction
+          ? Promise.resolve(host.api.invokeAction("session-usage", {taskId: ctx.taskId || undefined, sessionId: active, body: {refresh: Boolean(force)}}, fetchOptions)).then(function(data) {return {ok: true, headers: {get: function(){return "application/json";}}, json: function(){return Promise.resolve(data);}};})
+          : host.api.fetch(qs, fetchOptions);
       } catch {
         fetchPromise = Promise.reject(new Error("request_failed"));
       }
@@ -800,8 +846,8 @@ function makeSessionCostAction(host) {
     );
 
     var loaded = visibleState.data;
-    var iconColor = loaded && loaded.found ? tierColor(loaded.cost, loaded.warn_threshold, loaded.high_threshold) : undefined;
-    var hasInlineCost = loaded && loaded.found && !(loaded.tokscale && loaded.tokscale.installed === false);
+    var iconColor = loaded && loaded.found && loaded.cost_known !== false ? tierColor(loaded.cost, loaded.warn_threshold, loaded.high_threshold) : undefined;
+    var hasInlineCost = loaded && loaded.found && loaded.cost_known !== false && !(loaded.tokscale && loaded.tokscale.installed === false);
 
     function onTriggerClick() {
       pinnedRef.current = stateMatchesActive ? !pinnedRef.current : true;
@@ -820,7 +866,7 @@ function makeSessionCostAction(host) {
             id: "session-cost-action",
             label: actionLabel,
             icon: coinsIcon(h, 16, iconColor),
-            text: loaded && loaded.found ? fmtUSD(loaded.cost) : undefined,
+            text: hasInlineCost ? fmtUSD(loaded.cost) : undefined,
             tone: actionTone,
             pressed: visiblePinned,
             tooltip: "",
@@ -913,11 +959,228 @@ function makeSessionCostAction(host) {
   };
 }
 
+var IMPORT_TRANSLATIONS = {
+  en: {
+    importTitle: "Import historical usage",
+    importDescription: "Read existing local tokscale sessions into the Token Usage page.",
+    importWorkspace: "Workspace",
+    importNoWorkspace: "No workspace is available.",
+    importNotStarted: "History has not been imported.",
+    importRunning: "Import is running.",
+    importCompleted: "Import completed.",
+    importFailed: "Import failed.",
+    importCancelled: "Import was cancelled.",
+    importDisabled: "Enable statistics collection before importing history.",
+    importProcessed: "Processed {{count}} sessions",
+    importMissing: "{{count}} sessions have no matching tokscale usage.",
+    importUndated: "Some lifetime usage has no source date and stays outside dated charts.",
+    importLastSuccessful: "Last successful pass: {{value}}",
+    importStart: "Import history",
+    importAgain: "Import again",
+    importCancel: "Cancel import",
+    importWorking: "Working...",
+    importError: "Could not read import status: {{message}}",
+  },
+};
+
+function importStatusKey(status) {
+  switch (status) {
+    case "running":
+      return "importRunning";
+    case "completed":
+      return "importCompleted";
+    case "failed":
+      return "importFailed";
+    case "cancelled":
+      return "importCancelled";
+    case "disabled":
+      return "importDisabled";
+    default:
+      return "importNotStarted";
+  }
+}
+
+function importTranslation(t, key, values) {
+  return t(key, values ? { values: values } : undefined);
+}
+
+function makeHistoricalImportSettings(host) {
+  var React = host.React;
+  var h = host.jsx;
+  var ui = host.ui || {};
+  var Card = ui.Card || "div";
+  var CardHeader = ui.CardHeader || "div";
+  var CardTitle = ui.CardTitle || "div";
+  var CardContent = ui.CardContent || "div";
+  var Button = ui.Button || "button";
+  var Progress = ui.Progress || null;
+  var Spinner = ui.Spinner || null;
+  var Select = ui.Select || null;
+  var SelectContent = ui.SelectContent || null;
+  var SelectItem = ui.SelectItem || null;
+  var SelectTrigger = ui.SelectTrigger || null;
+  var SelectValue = ui.SelectValue || null;
+
+  return function HistoricalImportSettings() {
+    var translation = host.i18n && host.i18n.useTranslation
+      ? host.i18n.useTranslation()
+      : { t: function (key) { return key; } };
+    var t = translation.t;
+    var context = host.context || {};
+    var initialWorkspaceIds = context.getWorkspaceIds ? context.getWorkspaceIds() : [];
+    var workspaceIdsState = React.useState(Array.prototype.slice.call(initialWorkspaceIds || []));
+    var workspaceIds = workspaceIdsState[0];
+    var setWorkspaceIds = workspaceIdsState[1];
+    var selectedState = React.useState(function () {
+      var active = context.getActiveWorkspaceId ? context.getActiveWorkspaceId() : undefined;
+      return active || (workspaceIds.length ? workspaceIds[0] : "");
+    });
+    var workspaceId = selectedState[0];
+    var setWorkspaceId = selectedState[1];
+    var statusState = React.useState(null);
+    var status = statusState[0];
+    var setStatus = statusState[1];
+    var loadingState = React.useState(false);
+    var loading = loadingState[0];
+    var setLoading = loadingState[1];
+    var errorState = React.useState("");
+    var error = errorState[0];
+    var setError = errorState[1];
+    var busyState = React.useState(false);
+    var busy = busyState[0];
+    var setBusy = busyState[1];
+    var pollState = React.useState(0);
+    var poll = pollState[0];
+    var setPoll = pollState[1];
+
+    React.useEffect(function () {
+      if (!context.subscribeWorkspaces) return undefined;
+      function update(ids) {
+        var next = Array.prototype.slice.call(ids || []);
+        setWorkspaceIds(next);
+        setWorkspaceId(function (current) {
+          if (current && next.indexOf(current) >= 0) return current;
+          var active = context.getActiveWorkspaceId ? context.getActiveWorkspaceId() : undefined;
+          return active || (next.length ? next[0] : "");
+        });
+      }
+      var unsubscribe = context.subscribeWorkspaces(update);
+      update(context.getWorkspaceIds ? context.getWorkspaceIds() : workspaceIds);
+      return unsubscribe;
+    }, []);
+
+    React.useEffect(function () {
+      var cancelled = false;
+      var timer = null;
+      if (!workspaceId || !host.api || !host.api.invokeAction) {
+        setStatus(null);
+        setLoading(false);
+        return undefined;
+      }
+      function readStatus() {
+        setLoading(true);
+        host.api.invokeAction("historical-import-status", { workspaceId: workspaceId })
+          .then(function (next) {
+            if (cancelled) return;
+            setStatus(next || null);
+            setLoading(false);
+            if (next && next.status === "running") {
+              timer = setTimeout(function () { setPoll(function (value) { return value + 1; }); }, 2000);
+            }
+          })
+          .catch(function (reason) {
+            if (cancelled) return;
+            setLoading(false);
+            setError(String(reason && reason.message ? reason.message : reason));
+          });
+      }
+      setError("");
+      readStatus();
+      return function () {
+        cancelled = true;
+        if (timer !== null) clearTimeout(timer);
+      };
+    }, [workspaceId, poll]);
+
+    function runAction(action) {
+      if (!workspaceId || busy || !host.api || !host.api.invokeAction) return;
+      setBusy(true);
+      setError("");
+      host.api.invokeAction(action, { workspaceId: workspaceId })
+        .then(function (next) {
+          setStatus(next || null);
+          setPoll(function (value) { return value + 1; });
+        })
+        .catch(function (reason) {
+          setError(String(reason && reason.message ? reason.message : reason));
+        })
+        .then(function () { setBusy(false); });
+    }
+
+    var running = Boolean(status && status.status === "running");
+    var statusMessage = status
+      ? importTranslation(t, importStatusKey(status.status))
+      : importTranslation(t, "importNotStarted");
+    var processed = status && typeof status.processed === "number" ? status.processed : 0;
+    var missing = status && typeof status.missing === "number" ? status.missing : 0;
+    var children = [
+      h(CardHeader, { key: "header" },
+        h(CardTitle, null, importTranslation(t, "importTitle")),
+        h("p", { style: { fontSize: "12px", opacity: 0.7, margin: 0 } }, importTranslation(t, "importDescription"))),
+      h(CardContent, { key: "content", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+        workspaceIds.length > 1 && Select && SelectTrigger && SelectContent && SelectItem
+          ? h("label", { style: { display: "flex", flexDirection: "column", gap: "5px", fontSize: "12px" } },
+              h("span", null, importTranslation(t, "importWorkspace")),
+              h(Select, { value: workspaceId, onValueChange: setWorkspaceId },
+                h(SelectTrigger, { "aria-label": importTranslation(t, "importWorkspace") },
+                  SelectValue ? h(SelectValue, { placeholder: importTranslation(t, "importWorkspace") }) : workspaceId),
+                h(SelectContent, null, workspaceIds.map(function (id) {
+                  return h(SelectItem, { key: id, value: id }, id);
+                }))))
+          : workspaceId
+            ? h("div", { style: { fontSize: "12px", opacity: 0.7 } }, importTranslation(t, "importWorkspace") + ": " + workspaceId)
+            : h("div", { style: { fontSize: "12px", opacity: 0.7 } }, importTranslation(t, "importNoWorkspace")),
+        loading
+          ? h("div", { style: { display: "flex", alignItems: "center", gap: "7px", fontSize: "12px", opacity: 0.7 } },
+              Spinner ? h(Spinner, { style: { width: "14px", height: "14px" } }) : null,
+              importTranslation(t, "importWorking"))
+          : h("div", { style: { fontSize: "13px" } }, statusMessage),
+        running && Progress ? h(Progress, { "aria-label": statusMessage }) : null,
+        status && status.status !== "not_started"
+          ? h("div", { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px", opacity: 0.75 } },
+              h("span", null, importTranslation(t, "importProcessed", { count: processed })),
+              missing > 0 ? h("span", null, importTranslation(t, "importMissing", { count: missing })) : null,
+              status.last_successful_at
+                ? h("span", null, importTranslation(t, "importLastSuccessful", { value: status.last_successful_at }))
+                : null,
+              status.undated ? h("span", null, importTranslation(t, "importUndated")) : null)
+          : null,
+        status && status.last_error
+          ? h("div", { style: { color: COLOR.red, fontSize: "12px" } }, status.last_error)
+          : null,
+        error
+          ? h("div", { style: { color: COLOR.red, fontSize: "12px" } }, importTranslation(t, "importError", { message: error }))
+          : null,
+        h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px" } },
+          running
+            ? h(Button, { type: "button", variant: "outline", size: "sm", className: "min-h-11 cursor-pointer", disabled: busy, onClick: function () { runAction("historical-import-cancel"); } }, importTranslation(t, "importCancel"))
+            : h(Button, { type: "button", variant: "outline", size: "sm", className: "min-h-11 cursor-pointer", disabled: busy || !workspaceId, onClick: function () { runAction("historical-import-start"); } }, importTranslation(t, status && status.status === "completed" ? "importAgain" : "importStart")))
+      ),
+    ];
+    return h(Card, { "data-plugin": "kandev-session-cost", "data-testid": "historical-import-settings" }, children);
+  };
+}
+
 window.registerKandevPlugin("kandev-session-cost", {
   initialize: function (registry, host) {
     if (typeof registry.registerTranslations === "function") {
-      registry.registerTranslations(TRANSLATIONS);
+      var translations = {};
+      Object.keys(TRANSLATIONS).forEach(function (locale) {
+        translations[locale] = Object.assign({}, TRANSLATIONS[locale], IMPORT_TRANSLATIONS[locale]);
+      });
+      registry.registerTranslations(translations);
     }
     registry.registerComponent("chat-input-actions", makeSessionCostAction(host));
+    registry.registerComponent("plugin-settings", makeHistoricalImportSettings(host));
   },
 });
