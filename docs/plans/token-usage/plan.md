@@ -292,3 +292,22 @@ The E2E tables remain the follow-up browser coverage map. The checks listed abov
 - Canceling an npx parent alone can leave child processes alive.
 - Missing local executor transcripts remain missing coverage, not measured zero.
 - Existing cost-per-turn labels rely on tokscale message counts and need precise wording for saved data.
+
+## Main compatibility verification (2026-10-05)
+
+Rebased on the plugin 0.4.0 release. This feature targets 0.5.0 and pins core
+SDK commit `2e5fe80abddf8920f085b4828ff782b25aa5885e`.
+The toolbar retains the host Action and plugin translations. Package checks
+accept normalized YAML and the host-only platform manifest. Full packages
+still require all five platforms.
+
+Verification passed:
+
+- `make test vet build verify-package`: Go, bundle, package, and release checks.
+- `go test -trimpath -race ./server/... -count=1`: passed.
+- `make verify-package-host`: passed.
+- Desktop and mobile packaged browser smoke tests: 2 passed with retries disabled.
+  The smoke helper checks saved reads and explicit refresh through the authenticated action.
+
+The browser tests used the rebuilt core host and the 0.5.0 archive with
+`SESSION_COST_EXPECT_ACTION=1`, `E2E_PORT_OFFSET=27`, `--workers=1`, and `--retries=0`.
