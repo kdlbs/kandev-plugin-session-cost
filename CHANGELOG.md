@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1] - 2026-10-05
+
+### Changed
+
+- fix: keep session cost lookups responsive (#14) (d3d64c0)
+
+
 ## [0.4.0] - 2026-10-05
 
 ### Changed
