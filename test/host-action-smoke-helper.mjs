@@ -34,6 +34,16 @@ async function waitForQuickChatAction(dialog, expect) {
   });
 }
 
+async function waitForTouchTarget(action, expect) {
+  await expect
+    .poll(async () => {
+      const bounds = await action.boundingBox();
+      return Boolean(bounds && bounds.width >= 44 && bounds.height >= 44);
+    }, { timeout: 5_000 })
+    .toBe(true);
+  return action.boundingBox();
+}
+
 async function attachBackendDiagnostics(backend, testInfo, testPage) {
   if (testInfo && testPage) {
     await testInfo.attach("quick-chat-start-failure.png", {
@@ -127,10 +137,8 @@ export async function runSessionCostHostSmoke({
       await expect(openingAction).toHaveAttribute("aria-label", "Session cost");
 
       if (touch) {
-        const bounds = await openingAction.boundingBox();
+        const bounds = await waitForTouchTarget(openingAction, expect);
         expect(bounds).not.toBeNull();
-        expect(bounds.width).toBeGreaterThanOrEqual(44);
-        expect(bounds.height).toBeGreaterThanOrEqual(44);
         await openingAction.tap();
       } else {
         await openingAction.focus();
@@ -195,6 +203,7 @@ export async function runSessionCostHostSmoke({
     };
 
     const expectComposerGeometry = async (button) => {
+      if (touch) await waitForTouchTarget(button, expect);
       const layout = await button.evaluate((buttonElement) => {
         const toolbar = buttonElement.closest(
           '[data-testid="mobile-chat-input-toolbar"], [data-testid="chat-input-toolbar"]',
@@ -226,6 +235,8 @@ export async function runSessionCostHostSmoke({
           buttonInsideToolbar: Boolean(toolbarBounds && contains(toolbarBounds, buttonBounds)),
           buttonWidth: buttonBounds.right - buttonBounds.left,
           buttonHeight: buttonBounds.bottom - buttonBounds.top,
+          pointerCoarse: window.matchMedia("(pointer: coarse)").matches,
+          touchPoints: navigator.maxTouchPoints,
           documentWidth: document.documentElement.scrollWidth,
           documentClientWidth: document.documentElement.clientWidth,
         };
@@ -238,6 +249,8 @@ export async function runSessionCostHostSmoke({
       expect(layout.buttonInsideToolbar).toBe(true);
       expect(layout.documentWidth).toBeLessThanOrEqual(layout.documentClientWidth);
       if (touch) {
+        expect(layout.pointerCoarse).toBe(true);
+        expect(layout.touchPoints).toBeGreaterThan(0);
         expect(layout.buttonWidth).toBeGreaterThanOrEqual(44);
         expect(layout.buttonHeight).toBeGreaterThanOrEqual(44);
       } else {
@@ -258,9 +271,8 @@ export async function runSessionCostHostSmoke({
     }
 
     if (touch) {
-      const bounds = await action.boundingBox();
+      const bounds = await waitForTouchTarget(action, expect);
       expect(bounds).not.toBeNull();
-      expect(bounds.height).toBeGreaterThanOrEqual(44);
       await action.tap();
     } else {
       await action.hover();
@@ -321,10 +333,8 @@ export async function runSessionCostHostSmoke({
       await expect(taskChatAction).toHaveAttribute("data-variant", "ghost");
     }
     if (touch) {
-      const taskBounds = await taskChatAction.boundingBox();
+      const taskBounds = await waitForTouchTarget(taskChatAction, expect);
       expect(taskBounds).not.toBeNull();
-      expect(taskBounds.height).toBeGreaterThanOrEqual(44);
-      expect(taskBounds.width).toBeGreaterThanOrEqual(44);
       await taskChatAction.tap();
     } else {
       await taskChatAction.focus();
