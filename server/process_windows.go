@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"os/exec"
 	"strconv"
 	"time"
@@ -16,9 +17,8 @@ func configureCommandProcessTree(cmd *exec.Cmd) {
 		if cmd.Process == nil {
 			return nil
 		}
-		if err := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid)).Run(); err != nil {
-			return cmd.Process.Kill()
-		}
-		return nil
+		return cancelProcessTree(processCleanupTimeout, cmd.Process.Pid, func(ctx context.Context, pid int) error {
+			return exec.CommandContext(ctx, "taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run()
+		}, cmd.Process.Kill)
 	}
 }

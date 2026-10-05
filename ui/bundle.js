@@ -15,6 +15,8 @@ var COLOR = {
   red: "#ef4444",
   accent: "#6366f1",
 };
+var POLL_INTERVAL_MS = 2000;
+var POLL_TIMEOUT_MS = 130000;
 // Per-model dot palette, cycled by a stable hash of the model name.
 var MODEL_DOTS = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#f43f5e"];
 
@@ -515,7 +517,8 @@ function makeSessionCostAction(host) {
     var requestRef = React.useRef(null);
     var generationRef = React.useRef(0);
     var pollTimerRef = React.useRef(null);
-    var pollCountRef = React.useRef(0);
+    var pollDeadlineRef = React.useRef(null);
+    var pollDeadlineTimerRef = React.useRef(null);
     var resetSessionRef = React.useRef(activeSession);
     var activeSessionRef = React.useRef(activeSession);
     activeSessionRef.current = activeSession;
@@ -525,8 +528,48 @@ function makeSessionCostAction(host) {
       pollTimerRef.current = null;
     }
 
+    function clearPollDeadlineTimer() {
+      if (pollDeadlineTimerRef.current !== null) clearTimeout(pollDeadlineTimerRef.current);
+      pollDeadlineTimerRef.current = null;
+    }
+
+    function clearPollDeadline() {
+      clearPollDeadlineTimer();
+      pollDeadlineRef.current = null;
+    }
+
+    function startPollDeadline(sessionId) {
+      clearPollDeadline();
+      var deadline = { sessionId: sessionId, at: performance.now() + POLL_TIMEOUT_MS };
+      pollDeadlineRef.current = deadline;
+      return deadline;
+    }
+
+    function expirePending(deadline) {
+      if (pollDeadlineRef.current !== deadline || activeSessionRef.current !== deadline.sessionId) return;
+      clearPollTimer();
+      clearPollDeadline();
+      var request = requestRef.current;
+      if (request && request.sessionId === deadline.sessionId) {
+        requestRef.current = null;
+        if (request.timeoutTimer !== null) clearTimeout(request.timeoutTimer);
+        generationRef.current += 1;
+        if (request.controller) request.controller.abort();
+      }
+      setState(function (current) {
+        if (current.sessionId !== deadline.sessionId) return current;
+        return Object.assign({}, current, {
+          loading: false,
+          pending: false,
+          stale: Boolean(current.data) || current.stale,
+          error: "poll_timeout",
+        });
+      });
+    }
+
     function cancelRequests() {
       clearPollTimer();
+      clearPollDeadlineTimer();
       generationRef.current += 1;
       var request = requestRef.current;
       requestRef.current = null;
@@ -553,13 +596,14 @@ function makeSessionCostAction(host) {
           resetSessionRef.current = activeSession;
           pinnedRef.current = false;
           loadedForRef.current = null;
-          pollCountRef.current = 0;
+          clearPollDeadline();
           setPinned(false);
           setOpen(false);
           setState({ sessionId: activeSession, loading: false, pending: false, stale: false, data: null, error: null });
         }
         return function () {
           cancelRequests();
+          clearPollDeadline();
         };
       },
       [activeSession],
@@ -601,7 +645,9 @@ function makeSessionCostAction(host) {
       if (!active) return;
       if (requestRef.current && requestRef.current.sessionId === active) return;
       if (!poll && !force && loadedForRef.current === active) return;
-      if (force) pollCountRef.current = 0;
+      if (!poll || !pollDeadlineRef.current || pollDeadlineRef.current.sessionId !== active) {
+        startPollDeadline(active);
+      }
       var controller = typeof AbortController === "function" ? new AbortController() : null;
       var request = {
         sessionId: active,
@@ -636,6 +682,7 @@ function makeSessionCostAction(host) {
         clearRequestTimer();
         requestRef.current = null;
         generationRef.current += 1;
+        clearPollDeadline();
         loadedForRef.current = active;
         if (controller) controller.abort();
         setState(function (current) {
@@ -669,9 +716,11 @@ function makeSessionCostAction(host) {
           requestRef.current = null;
           loadedForRef.current = active;
           if (data.report_state === "pending") {
-            if (force || !visibleState.pending) pollCountRef.current = 0;
+            if (!pollDeadlineRef.current || pollDeadlineRef.current.sessionId !== active) {
+              startPollDeadline(active);
+            }
           } else {
-            pollCountRef.current = 0;
+            clearPollDeadline();
           }
           setState(function (current) {
             if (current.sessionId !== active) return current;
@@ -690,6 +739,7 @@ function makeSessionCostAction(host) {
           clearRequestTimer();
           requestRef.current = null;
           loadedForRef.current = active;
+          clearPollDeadline();
           if (controller) controller.abort();
           setState(function (current) {
             if (current.sessionId !== active) return current;
@@ -707,21 +757,36 @@ function makeSessionCostAction(host) {
 
     React.useEffect(
       function () {
-        if (!visibleOpen || !visibleState.pending || visibleState.loading) return undefined;
+        if (!visibleOpen || !visibleState.pending) {
+          clearPollTimer();
+          clearPollDeadlineTimer();
+          return undefined;
+        }
+
+        var deadline = pollDeadlineRef.current;
+        if (!deadline || deadline.sessionId !== activeSession) deadline = startPollDeadline(activeSession);
+        var remaining = deadline.at - performance.now();
+        if (remaining <= 0) {
+          expirePending(deadline);
+          return undefined;
+        }
+        if (pollDeadlineTimerRef.current === null) {
+          pollDeadlineTimerRef.current = setTimeout(function () {
+            pollDeadlineTimerRef.current = null;
+            expirePending(deadline);
+          }, remaining);
+        }
+        if (visibleState.loading) return undefined;
+
         var timer = setTimeout(function () {
           if (pollTimerRef.current === timer) pollTimerRef.current = null;
-          var nextPoll = pollCountRef.current + 1;
-          if (nextPoll >= 65) {
-            pollCountRef.current = 0;
-            setState(function (current) {
-              if (current.sessionId !== activeSession) return current;
-              return Object.assign({}, current, { pending: false, error: "poll_timeout" });
-            });
+          if (pollDeadlineRef.current !== deadline) return;
+          if (performance.now() >= deadline.at) {
+            expirePending(deadline);
             return;
           }
-          pollCountRef.current = nextPoll;
           load(false, true);
-        }, 2000);
+        }, Math.min(POLL_INTERVAL_MS, remaining));
         pollTimerRef.current = timer;
         return function () {
           if (pollTimerRef.current === timer) {

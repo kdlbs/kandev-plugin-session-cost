@@ -79,6 +79,9 @@ function createFakeTimers() {
     clearTimeout(id) {
       timers.delete(id);
     },
+    now() {
+      return now;
+    },
     advance(duration) {
       const end = now + duration;
       while (true) {
@@ -251,6 +254,7 @@ function createActionHarness(options = {}) {
     Node: FakeNode,
     String,
     AbortController,
+    performance: { now: timers.now },
     setTimeout: timers.setTimeout,
     clearTimeout: timers.clearTimeout,
   };
@@ -823,7 +827,7 @@ test("closing or unmounting pending details cancels polling and obsolete request
   view.trigger().props.onClick();
   view.requests[0].resolve(costResponse({ found: false, cost: 0, turns: 0, report_state: "pending" }));
   await flushPromises();
-  assert.equal(view.pendingTimers(), 1);
+  assert.equal(view.pendingTimers(), 2);
 
   view.advanceTimers(2000);
   assert.equal(view.requests.length, 2);
@@ -843,7 +847,7 @@ test("closing or unmounting pending details cancels polling and obsolete request
   assert.equal(view.requests.length, 3);
   view.requests[2].resolve(costResponse({ found: false, cost: 0, turns: 0, report_state: "pending" }));
   await flushPromises();
-  assert.equal(view.pendingTimers(), 1);
+  assert.equal(view.pendingTimers(), 2);
   view.unmount();
   assert.equal(view.pendingTimers(), 0);
   view.advanceTimers(4000);
@@ -897,22 +901,27 @@ test("request timeout aborts the fetch and preserves a previous result", async (
   assert.equal(view.refresh().props.disabled, false);
 });
 
-test("automatic polling stops after 130 seconds and leaves Refresh available", async () => {
+test("automatic polling stops at 130 elapsed seconds and aborts an in-flight poll", async () => {
   const view = createActionHarness();
   view.trigger().props.onClick();
   view.requests[0].resolve(costResponse({ found: false, cost: 0, turns: 0, report_state: "pending" }));
   await flushPromises();
 
-  for (let poll = 0; poll < 64; poll += 1) {
+  for (let poll = 0; poll < 24; poll += 1) {
     view.advanceTimers(2000);
     const request = view.requests[view.requests.length - 1];
     assert.equal(view.requests.length, poll + 2);
+    view.advanceTimers(3000);
     request.resolve(costResponse({ found: false, cost: 0, turns: 0, report_state: "pending" }));
     await flushPromises();
   }
-  view.advanceTimers(2000);
 
-  assert.equal(view.requests.length, 65);
+  view.advanceTimers(2000);
+  assert.equal(view.requests.length, 26);
+  const inFlightPoll = view.requests[25];
+  view.advanceTimers(8000);
+
+  assert.equal(inFlightPoll.signal.aborted, true);
   assert.match(view.text(), /Cost calculation is taking too long/);
   assert.equal(view.refresh().props.disabled, false);
   assert.equal(view.pendingTimers(), 0);
