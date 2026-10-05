@@ -105,12 +105,12 @@ Remove only the owned temporary workspace after all commands finish.
 
 Checks passed against pinned Kandev source `570600439036e81f8e9e1c63f15c4abce8a6c846` using Go 1.26.0 on Linux amd64. The isolated SDK install (`pnpm install --frozen-lockfile`) and SDK backend, web E2E, and plugin-package builds passed.
 
-`make check-format`, temporary pinned-SDK `go mod tidy` comparison, `make vet`, `make test`, `go test -race ./server/... -count=1`, `make build`, `make verify-package-host`, `make verify-package`, both syntax checks, and `git diff --check` passed. The bundle suite passed all 26 tests. Package verification checked manifest identity, inventory, checksums, and Linux amd64, Linux arm64, macOS amd64, macOS arm64, and Windows amd64 binaries.
+`make check-format`, temporary pinned-SDK `go mod tidy` comparison, `make vet`, `make test`, `go test -race ./server/... -count=1`, `make build`, `make verify-package-host`, `make verify-package`, a Windows amd64 test-binary cross-compile, both syntax checks, and `git diff --check` passed. The bundle suite passed all 26 tests. Package verification checked manifest identity, inventory, checksums, and Linux amd64, Linux arm64, macOS amd64, macOS arm64, and Windows amd64 binaries. The new cleanup helper tests passed with the race detector.
 
 The exact package passed the disposable packaged host smoke on Linux amd64 in desktop Chromium and phone Chrome. Each browser project passed 1 test. The smoke used installed webhook requests and a temporary blocking/failing tokscale fixture. Linux child-process cancellation passed its runtime test; Windows and macOS binaries cross-compiled, but process cancellation was not runtime-tested there. No live installation was used.
 
-Package: `kandev-session-cost-0.4.0.tar.gz`; SHA-256: `4a6bcf5512ebd6592e3367b20b2577e52a554d3d869949c989be21f43b5b2766`.
+Package: `kandev-session-cost-0.4.0.tar.gz`; SHA-256: `1cfba22efc52f9dab022cc913981f455f339fdf014a66c1e1a308828c1cd50d0`.
 
 Remote `main` remains `91be5a0046b869fbb87551d8753ea094e0adc349`. PR #10 remains open at `76e74ad0fa69ba4a254f730ff3c36d5fd5428b5a`; its persistent collection overlaps files in this repair. The PR description records that overlap. The generated package/build outputs and owned pinned-SDK checkout were removed after verification.
 
-Implementation commit `98d316bafd8f9e0bfe3bb6342321d3360969bb16` was pushed on `feature/diagnose-session-cos-3b5`. PR #14 is open against `main`: https://github.com/kdlbs/kandev-plugin-session-cost/pull/14. At the last check, Build and CI were queued and Greptile was in progress; no CI success is claimed.
+The review fixes were committed as `4c61727c0f2fa2e6dafa91b525dee5106d28557f` and pushed to `feature/diagnose-session-cos-3b5`. PR #14 is open against `main`: https://github.com/kdlbs/kandev-plugin-session-cost/pull/14. Its description now covers both findings and their verification. At verification, Build and CI were queued and Cubic was neutral; no CI success is claimed.

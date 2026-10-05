@@ -16,7 +16,7 @@ Covers AC-SESSION-COST-LOOKUP-001.1 through .10.
 
 ## Owned files
 
-`server/plugin.go`, `server/tokscale.go`, `server/main.go`, new report coordinator and runner helpers, and colocated Go tests.
+`server/plugin.go`, `server/tokscale.go`, `server/main.go`, new report coordinator and runner helpers, `server/process_test.go`, and colocated Go tests.
 Keep the manifest, SDK pin, permissions, module replacement, and release identity unchanged.
 
 ## TDD and implementation
@@ -48,4 +48,4 @@ make vet
 ## Risks and results
 
 OS process-tree cancellation requires platform helpers and runtime tests. Cross-build results alone do not prove cleanup.
-Results: The regression failed before the implementation because the webhook waited for the blocked runner. After implementation, the slow-report test, full server tests, race tests, format check, and vet passed. The cancellation test confirmed a child process could not keep output draining blocked on Linux. Windows amd64 and macOS arm64 test binaries cross-compiled; those builds do not prove platform process cleanup at runtime.
+Results: The regression failed before the implementation because the webhook waited for the blocked runner. After implementation, the slow-report test, full server tests, race tests, format check, and vet passed. The cancellation test confirmed a child process could not keep output draining blocked on Linux. Windows cleanup now runs `taskkill` with a separate two-second context and falls back to killing the launched process. Shared helper tests verify the deadline and fallback. Windows amd64 and macOS arm64 test binaries cross-compiled; those builds do not prove platform process cleanup at runtime.

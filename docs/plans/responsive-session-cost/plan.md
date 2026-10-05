@@ -1,6 +1,6 @@
 ---
 created: 2026-10-05
-status: in_progress
+status: done
 requirements:
   - REQ-SESSION-COST-LOOKUP-001
   - REQ-SESSION-COST-RECOVERY-002
@@ -95,4 +95,4 @@ PR #10 overlaps this change. Record any remaining overlap in the PR description.
 
 ## Results
 
-All three work orders are complete. Source, package, desktop, phone, and documentation checks pass. Commit `98d316bafd8f9e0bfe3bb6342321d3360969bb16` is on `feature/diagnose-session-cos-3b5`, and [PR #14](https://github.com/kdlbs/kandev-plugin-session-cost/pull/14) is open. Required GitHub CI checks were queued at the last check.
+All three work orders and the two review follow-ups are complete. The package and disposable desktop/phone smoke tests pass. Commit `4c61727c0f2fa2e6dafa91b525dee5106d28557f` is on `feature/diagnose-session-cos-3b5`, and [PR #14](https://github.com/kdlbs/kandev-plugin-session-cost/pull/14) is open. Build and CI checks were queued at the last check.
