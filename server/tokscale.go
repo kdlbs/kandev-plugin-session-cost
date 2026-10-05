@@ -38,50 +38,24 @@ func resolveCommand(configured string, lookPath func(string) (string, error)) re
 	return resolvedCommand{Argv: []string{"npx", "-y", pinnedTokscale}, Source: sourceNpx}
 }
 
-// InstallStatus reports whether the resolved command actually runs, and as
-// what version. Embedded in every session-cost payload so the UI can render
-// setup guidance from the same shape it always reads.
+// InstallStatus reports the command used to build a successful report. It
+// remains part of the response for compatibility with existing UI.
 type InstallStatus struct {
 	// Command is the resolved argv joined for display, e.g. "npx -y tokscale@4.15.1".
 	Command string `json:"command"`
 	// Source is where the command came from: "settings", "path" or "npx".
-	Source    string `json:"source"`
+	Source string `json:"source"`
+	// Installed is true when the report command completes successfully.
 	Installed bool   `json:"installed"`
 	Version   string `json:"version,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
 
-// runner executes a command and returns its stdout — exec.CommandContext in
-// production (see newPlugin), injected for tests.
+// runner executes a command and returns its stdout. Tests inject deterministic
+// implementations; production uses the process-tree-aware runner.
 type runner func(ctx context.Context, name string, args ...string) ([]byte, error)
 
 // commandDisplay renders the resolved argv for humans ("npx -y tokscale@4.15.1").
 func commandDisplay(cmd resolvedCommand) string {
 	return strings.Join(cmd.Argv, " ")
-}
-
-// probeInstall checks the resolved command works by running `--version` and
-// parsing the version out of its output ("tokscale 4.15.1").
-func probeInstall(ctx context.Context, cmd resolvedCommand, run runner) InstallStatus {
-	status := InstallStatus{Command: commandDisplay(cmd), Source: cmd.Source}
-	out, err := run(ctx, cmd.Argv[0], append(cmd.Argv[1:], "--version")...)
-	if err != nil {
-		status.Error = err.Error()
-		return status
-	}
-	status.Installed = true
-	status.Version = parseVersion(string(out))
-	return status
-}
-
-// parseVersion extracts "4.15.1" from tokscale's `--version` output, which may
-// be preceded by npx install noise. Empty when no version line is found.
-func parseVersion(out string) string {
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 2 && fields[0] == "tokscale" {
-			return fields[1]
-		}
-	}
-	return ""
 }

@@ -5,8 +5,7 @@
 // third-party plugin author would.
 package main
 
-import "github.com/kandev/kandev/pkg/pluginsdk"
-
 func main() {
-	pluginsdk.Serve(newPlugin())
+	p := newPlugin()
+	servePlugin(p)
 }
