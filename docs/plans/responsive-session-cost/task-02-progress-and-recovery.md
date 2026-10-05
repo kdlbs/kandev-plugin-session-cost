@@ -72,3 +72,5 @@ Run the packaged desktop and phone checks in task 03 before delivery.
 
 The current fake responses provide only `json()`. Update them to model real Response metadata rather than weakening response validation.
 Results: The HTML gateway regression failed against the old bundle with a JSON parser error that included the HTML body. A no-transcript regression also failed because it showed tokscale setup guidance. The current bundle validates transport and report data, then shows the no-transcript state before command guidance. All 26 bundle tests pass. The elapsed-time test simulates 24 pending polls with three-second responses, then verifies the 130-second deadline aborts an in-flight poll. Close, session change, unmount, and retry coverage still passes. Both syntax checks and the packaged desktop and phone scenarios pass under task 03.
+
+PR fixup: `node --test test/bundle.test.mjs` passed all 26 tests after adding coverage that reopening details makes a normal lookup and retains the previous value until the new result arrives. The system design and recovery requirements now state that reopening must let the report freshness interval take effect.

@@ -50,6 +50,7 @@ Session Cost owns this outcome because it calculates and presents the cost.
 - **AC-SESSION-COST-RECOVERY-002.4:** Pending status polling shall stop when details close, the session changes, or the plugin unmounts or is disabled.
 - **AC-SESSION-COST-RECOVERY-002.5:** Existing successful responses without progress metadata shall continue to render correctly.
 - **AC-SESSION-COST-RECOVERY-002.6:** Error and progress text shall use plugin translations and remain contained within the details surface.
+- **AC-SESSION-COST-RECOVERY-002.7:** Reopening details after a successful lookup shall make a normal lookup so the report freshness interval can take effect, while retaining the previous value during the request.
 
 ## Out of scope
 

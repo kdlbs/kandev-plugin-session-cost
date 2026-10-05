@@ -100,6 +100,7 @@ Validate the report fields consumed by the renderer; reject malformed values rat
 
 Keep at most one request and one polling timer per mounted action.
 Poll pending status every two seconds while details remain open, without sending `refresh=1` again.
+After details close, clear the local loaded marker so a later open makes a normal request and the coordinator's freshness interval can take effect.
 Use a ten-second browser request deadline and stop automatic polling after 130 seconds with retry available.
 Clear timers and abort obsolete requests on close, session change, unmount, and disable.
 Use a request-generation guard so late responses cannot overwrite a newer session or refresh.

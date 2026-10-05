@@ -516,11 +516,11 @@ test("per-model token columns align left, center, and right", async () => {
   assert.match(view.text(), /In 200KOut 11\.7KCache 300K/);
 });
 
-test("second tap closes without loading and cached reopen stays request-free", async () => {
+test("second tap closes and reopening checks the cached report without forcing refresh", async () => {
   const view = createActionHarness();
 
   view.trigger().props.onClick();
-  view.requests[0].resolve(costResponse({ found: false, cost: 0, turns: 0, input: 0, output: 0 }));
+  view.requests[0].resolve(costResponse({ cost: 1.25, cost_per_turn: 1.25 }));
   await flushPromises();
 
   view.trigger().props.onClick();
@@ -529,7 +529,14 @@ test("second tap closes without loading and cached reopen stays request-free", a
 
   view.trigger().props.onClick();
   assert.equal(view.tooltip().props.open, true);
-  assert.equal(view.requests.length, 1);
+  assert.equal(view.requests.length, 2);
+  assert.doesNotMatch(view.requests[1].url, /refresh=1/);
+  assert.match(view.text(), /\$1\.25/);
+
+  view.requests[1].resolve(costResponse({ cost: 2, cost_per_turn: 2 }));
+  await flushPromises();
+
+  assert.match(view.text(), /\$2\.00/);
 });
 
 test("pinned Refresh forces one request and stays open while disabled", async () => {
@@ -842,16 +849,16 @@ test("closing or unmounting pending details cancels polling and obsolete request
   assert.doesNotMatch(view.text(), /\$99\.00/);
 
   view.trigger().props.onClick();
-  assert.equal(view.requests.length, 2);
-  view.advanceTimers(2000);
   assert.equal(view.requests.length, 3);
   view.requests[2].resolve(costResponse({ found: false, cost: 0, turns: 0, report_state: "pending" }));
   await flushPromises();
   assert.equal(view.pendingTimers(), 2);
+  view.advanceTimers(2000);
+  assert.equal(view.requests.length, 4);
   view.unmount();
   assert.equal(view.pendingTimers(), 0);
   view.advanceTimers(4000);
-  assert.equal(view.requests.length, 3);
+  assert.equal(view.requests.length, 4);
 });
 
 test("reopening after the initial request is canceled starts a fresh request", () => {

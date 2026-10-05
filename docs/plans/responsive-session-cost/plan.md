@@ -95,4 +95,4 @@ PR #10 overlaps this change. Record any remaining overlap in the PR description.
 
 ## Results
 
-All three work orders and the two review follow-ups are complete. The package and disposable desktop/phone smoke tests pass. Commit `4c61727c0f2fa2e6dafa91b525dee5106d28557f` is on `feature/diagnose-session-cos-3b5`, and [PR #14](https://github.com/kdlbs/kandev-plugin-session-cost/pull/14) is open. Build and CI checks were queued at the last check.
+All three work orders and three review follow-ups are complete. The reopen-freshness fix passes the bundle suite, JavaScript syntax check, format check, and full five-platform package verification against the pinned SDK. The earlier desktop and phone smoke passed before this UI-only behavior follow-up; the new bundle regression covers reopening details and applying the server freshness interval. [PR #14](https://github.com/kdlbs/kandev-plugin-session-cost/pull/14) remains open; use its live state for exact-head CI and review results. No merge, release, or live-plugin installation was performed.

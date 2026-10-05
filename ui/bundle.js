@@ -581,6 +581,7 @@ function makeSessionCostAction(host) {
 
     function closeDetails() {
       cancelRequests();
+      loadedForRef.current = null;
       pinnedRef.current = false;
       setPinned(false);
       setOpen(false);
