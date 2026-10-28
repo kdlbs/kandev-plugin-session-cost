@@ -455,7 +455,11 @@ func sourceLocation() *time.Location {
 }
 
 func sourceTimezone() string {
-	if name := sourceLocation().String(); name != "" && name != "Local" {
+	return resolveSourceTimezone(sourceLocation(), os.Readlink, platformSourceTimezone)
+}
+
+func resolveSourceTimezone(location *time.Location, readlink func(string) (string, error), fallback func() string) string {
+	if name := location.String(); name != "" && name != "Local" {
 		if _, err := time.LoadLocation(name); err == nil {
 			return name
 		}
@@ -464,7 +468,7 @@ func sourceTimezone() string {
 	// time.Local commonly reports only "Local" even when the process is using
 	// an IANA zone. Recover the zone from the standard Unix localtime link so a
 	// saved source date can be interpreted with the same DST rules by the Host.
-	if target, err := os.Readlink("/etc/localtime"); err == nil {
+	if target, err := readlink("/etc/localtime"); err == nil {
 		if marker := "/zoneinfo/"; strings.Contains(target, marker) {
 			name := target[strings.Index(target, marker)+len(marker):]
 			if name != "" {
@@ -472,7 +476,7 @@ func sourceTimezone() string {
 			}
 		}
 	}
-	return platformSourceTimezone()
+	return fallback()
 }
 
 func listAllSessions(ctx context.Context, reader pluginsdk.SessionReader) ([]pluginsdk.Session, error) {

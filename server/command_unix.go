@@ -2,4 +2,4 @@
 
 package main
 
-func platformSourceTimezone() string { return "UTC" }
+func platformSourceTimezone() string { return "" }

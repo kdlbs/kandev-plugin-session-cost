@@ -67,7 +67,7 @@ arm64, and Windows amd64. The UI uses the host's React instance and does not
 bundle a second React runtime.
 
 The Go and frontend SDK source pin is
-`2e5fe80abddf8920f085b4828ff782b25aa5885e`. This includes core token usage
+`9aecf156c65e7522a43f2a1c8310737179c25d70`. This includes core token usage
 PR #3660 and `host.ui.Action` from host PR #3943. This is a source revision, not a Kandev release number. The
 UI detects Action and retains the Button path for older hosts. The manifest
 does not declare a minimum Kandev version. Packaged UI checks passed against
@@ -106,7 +106,7 @@ for this plugin worktree and pin it to the source revision above:
 
 ```sh
 git clone --filter=blob:none https://github.com/kdlbs/kandev.git ../kandev
-git -C ../kandev checkout --detach 2e5fe80abddf8920f085b4828ff782b25aa5885e
+git -C ../kandev checkout --detach 9aecf156c65e7522a43f2a1c8310737179c25d70
 ```
 
 Do not point the module replacement at a floating branch. The host checkout is
