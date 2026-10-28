@@ -12,6 +12,15 @@ legacy_specs: []
 
 # Implementation Plan: Session Cost Usage Collection
 
+## Retained-history follow-up
+
+This package's completed results describe its earlier contract.
+The [core Retained Usage History package](../../../../kandev/docs/plans/usage-history/plan.md)
+owns new retained bindings, collector interoperability, org/user attribution, and bounded statistics queries.
+Its [Task 06](../../../../kandev/docs/plans/usage-history/task-06-session-cost-adapter.md)
+owns this plugin's new adapter and import compatibility changes, which remain pending.
+Record the finalized SDK pin and exact integration results there. Earlier done statuses do not establish the new contract.
+
 ## Overview
 
 Connect Session Cost to Kandev's core usage service, then add optional collection and saved-cost display.
