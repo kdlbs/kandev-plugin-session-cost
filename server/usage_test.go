@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,6 +19,7 @@ type usageRecordingReader struct {
 	upserts     int
 	listings    int
 	writeStatus string
+	canonicalFn func(context.Context, pluginsdk.SessionUsageFilter, pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error)
 }
 
 func (r *usageRecordingReader) UpsertBatch(_ context.Context, workspaceID string, items []pluginsdk.SessionUsageMeasurement) ([]pluginsdk.SessionUsageWriteResult, error) {
@@ -99,6 +100,9 @@ func (r *usageRecordingReader) List(_ context.Context, filter pluginsdk.SessionU
 
 func (r *usageRecordingReader) ListCanonical(ctx context.Context, filter pluginsdk.SessionUsageFilter, page pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
 	filter.Canonical = true
+	if r.canonicalFn != nil {
+		return r.canonicalFn(ctx, filter, page)
+	}
 	return r.List(ctx, filter, page)
 }
 
@@ -264,7 +268,7 @@ func TestPersistSessionUsagePreservesTokscaleUnknownFields(t *testing.T) {
 	require.Nil(t, item.CacheWriteTokens)
 	require.Nil(t, item.ReasoningTokens)
 	require.Nil(t, item.TotalTokens, "a total is unknown when tokscale omits source categories")
-	require.Nil(t, item.Turns, "an omitted message count remains unknown")
+	require.Nil(t, item.Turns, "tokscale does not supply Kandev turn evidence")
 	require.NotNil(t, item.CostSubcents)
 	require.Equal(t, int64(0), *item.CostSubcents, "an emitted zero cost remains known")
 	require.Equal(t, "estimated", item.CostBasis)
@@ -404,11 +408,14 @@ func TestPersistSessionUsageIsIdempotentAcrossMultipleModels(t *testing.T) {
 		ACPSessionID: "transcript-1",
 		Found:        true,
 		CostKnown:    true,
-		turnsKnown:   true,
 		Turns:        2,
 		Models: []sessionModel{
 			{Model: "model-a", Provider: "provider-a", Input: 10, Output: 2, Cost: 0.01},
 			{Model: "model-b", Provider: "provider-b", Input: 20, Output: 3, Cost: 0.02},
+		},
+		sourceEntries: []sessionModelEntry{
+			{SessionID: "transcript-1", Model: "model-a", Provider: "provider-a", Input: 10, Output: 2, Cost: 0.01},
+			{SessionID: "transcript-1", Model: "model-b", Provider: "provider-b", Input: 20, Output: 3, Cost: 0.02},
 		},
 	}
 	require.NoError(t, p.persistSessionUsage(context.Background(), "ws-1", "task-1", "session-1", response))
@@ -512,10 +519,10 @@ func TestCollectorRetriesTerminalSessionForDelayedTranscript(t *testing.T) {
 		called++
 		return []byte(`{"entries":[]}`), nil
 	}
-	host := &fakeHost{
+	host := &collectorHost{&usageRecordingHost{fakeHost: &fakeHost{
 		config:   map[string]any{configKeyCollect: true},
 		sessions: []pluginsdk.Session{{ID: "session-1", TaskID: "task-1", ACPSessionID: "transcript-1", State: "COMPLETED", StartedAt: fixedNow.Format(time.RFC3339Nano), UpdatedAt: fixedNow.Format(time.RFC3339Nano)}},
-	}
+	}, usage: &usageRecordingReader{}}}
 	p.SetHost(host)
 	require.NoError(t, host.SetState(context.Background(), collectorStateScope, collectorStateID, collectorStateKey, map[string]any{
 		"last_scan_at": fixedNow.Add(-time.Hour).Format(time.RFC3339Nano), "initialized": true,

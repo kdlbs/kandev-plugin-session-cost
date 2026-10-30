@@ -33,7 +33,6 @@ type usageTotals struct {
 	Input     int64
 	Output    int64
 	CacheRead int64
-	Turns     int64
 	Models    []sessionModel
 }
 
@@ -219,7 +218,6 @@ func buildReportSnapshot(entries []sessionModelEntry, cmd resolvedCommand, gener
 		totals.Input += entry.Input
 		totals.Output += entry.Output
 		totals.CacheRead += entry.CacheRead
-		totals.Turns += entry.MessageCount
 		totals.Models = append(totals.Models, sessionModel{
 			Model:     entry.Model,
 			Input:     entry.Input,
@@ -244,7 +242,6 @@ func (s *reportSnapshot) usageFor(acpSessionID string) usageTotals {
 		usage.Input += totals.Input
 		usage.Output += totals.Output
 		usage.CacheRead += totals.CacheRead
-		usage.Turns += totals.Turns
 		usage.Models = append(usage.Models, totals.Models...)
 	}
 	if usage.Models == nil {

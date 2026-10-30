@@ -4,7 +4,7 @@ BIN := bin/kandev-session-cost
 VERSION := 0.5.0
 STAGE := .build/stage
 PKG_OUT := kandev-session-cost-$(VERSION).tar.gz
-KANDEV_SDK := ../kandev/apps/backend
+KANDEV_BACKEND := ../kandev/apps/backend
 
 ## Build the plugin binary for this machine during development.
 build:
@@ -29,7 +29,7 @@ vet:
 	go vet ./server/...
 
 ## Build every platform declared by manifest.yaml and package the plugin with
-## the pinned sibling Kandev checkout's plugin-pack command.
+## the sibling Kandev checkout's backend plugin-pack command.
 package:
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/server
@@ -40,7 +40,7 @@ package:
 	GOOS=darwin  GOARCH=amd64 go build -o $(STAGE)/server/plugin-darwin-amd64      ./server
 	GOOS=darwin  GOARCH=arm64 go build -o $(STAGE)/server/plugin-darwin-arm64      ./server
 	GOOS=windows GOARCH=amd64 go build -o $(STAGE)/server/plugin-windows-amd64.exe ./server
-	cd $(KANDEV_SDK) && go run ./cmd/plugin-pack -dir $(CURDIR)/$(STAGE) -out $(CURDIR)/$(PKG_OUT)
+	cd $(KANDEV_BACKEND) && go run ./cmd/plugin-pack -dir $(CURDIR)/$(STAGE) -out $(CURDIR)/$(PKG_OUT)
 	rm -rf $(STAGE)
 	@echo "Wrote $(PKG_OUT)"
 
@@ -51,7 +51,7 @@ package-host:
 	cp manifest.yaml $(STAGE)/manifest.yaml
 	cp -r ui $(STAGE)/ui
 	go build -o $(STAGE)/server/plugin-$$(go env GOOS)-$$(go env GOARCH)$$(go env GOEXE) ./server
-	cd $(KANDEV_SDK) && go run ./cmd/plugin-pack -dir $(CURDIR)/$(STAGE) -out $(CURDIR)/$(PKG_OUT) -platform-only
+	cd $(KANDEV_BACKEND) && go run ./cmd/plugin-pack -dir $(CURDIR)/$(STAGE) -out $(CURDIR)/$(PKG_OUT) -platform-only
 	rm -rf $(STAGE)
 	@echo "Wrote $(PKG_OUT)"
 

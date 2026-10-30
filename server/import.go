@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const (
@@ -17,40 +18,55 @@ const (
 	importStateKey   = "historical-import"
 	importPageSize   = int32(50)
 
-	importStatusNotStarted = "not_started"
-	importStatusRunning    = "running"
-	importStatusCompleted  = "completed"
-	importStatusFailed     = "failed"
-	importStatusCancelled  = "cancelled"
-	importStatusDisabled   = "disabled"
-	maxMissingSessionIDs   = 100
+	importStatusNotStarted  = "not_started"
+	importStatusRunning     = "running"
+	importStatusPreparing   = "preparing"
+	importStatusCompleted   = "completed"
+	importStatusFailed      = "failed"
+	importStatusCancelled   = "cancelled"
+	importStatusDisabled    = "disabled"
+	importStatusUnsupported = "unsupported"
+	maxMissingSessionIDs    = 100
 )
 
-// historicalImportState is deliberately small. The session cursor is the
-// resumable boundary; accepted measurements are idempotent at the Host usage
-// service, so a process restart can safely replay the current page.
+// historicalImportState retains one bounded target page. Snapshot identity,
+// keyset position and pending source dates survive restart and live deletion.
 type historicalImportState struct {
-	WorkspaceID       string   `json:"workspace_id"`
-	Status            string   `json:"status"`
-	Cursor            string   `json:"cursor,omitempty"`
-	Processed         int      `json:"processed"`
-	Missing           int      `json:"missing"`
-	MissingSessionIDs []string `json:"missing_session_ids,omitempty"`
-	LastError         string   `json:"last_error,omitempty"`
-	StartedAt         string   `json:"started_at,omitempty"`
-	FinishedAt        string   `json:"finished_at,omitempty"`
-	LastSuccessfulAt  string   `json:"last_successful_at,omitempty"`
-	Undated           bool     `json:"undated"`
-	Dates             []string `json:"pending_dates,omitempty"`
+	RunID               string                              `json:"run_id,omitempty"`
+	SchemaVersion       int                                 `json:"schema_version"`
+	DiagnosticsReliable bool                                `json:"diagnostics_reliable"`
+	LegacyDiagnostics   bool                                `json:"legacy_diagnostics,omitempty"`
+	SnapshotID          string                              `json:"snapshot_id,omitempty"`
+	SnapshotUpperBound  int64                               `json:"snapshot_upper_bound,string,omitempty"`
+	PageTargets         []pluginsdk.UsageCollectionTargetV1 `json:"page_targets,omitempty"`
+	PageNextCursor      string                              `json:"page_next_cursor,omitempty"`
+	PageHasMore         bool                                `json:"page_has_more,omitempty"`
+	PageDates           map[string][]string                 `json:"page_dates,omitempty"`
+	PageFound           map[string]bool                     `json:"page_found,omitempty"`
+	PageMissingIDs      []string                            `json:"page_missing_ids,omitempty"`
+	WorkspaceID         string                              `json:"workspace_id"`
+	Status              string                              `json:"status"`
+	Cursor              string                              `json:"cursor,omitempty"`
+	Processed           int                                 `json:"processed"`
+	Missing             int                                 `json:"missing"`
+	MissingSessionIDs   []string                            `json:"missing_session_ids,omitempty"`
+	LastError           string                              `json:"last_error,omitempty"`
+	StartedAt           string                              `json:"started_at,omitempty"`
+	FinishedAt          string                              `json:"finished_at,omitempty"`
+	LastSuccessfulAt    string                              `json:"last_successful_at,omitempty"`
+	Undated             bool                                `json:"undated"`
+	Dates               []string                            `json:"pending_dates,omitempty"`
 }
 
 func (p *plugin) handleHistoricalImportAction(ctx context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+	ctx, cancel := p.canonicalReadContext(ctx)
+	defer cancel()
 	if req.Context.WorkspaceID == "" || req.Context.TaskID != "" || req.Context.SessionID != "" || req.Context.RepositoryID != "" {
 		return importJSONResponse(400, map[string]string{"error": "workspace context is required"})
 	}
 	switch req.ActionKey {
 	case actionKeyImportStatus:
-		state, found, err := p.loadHistoricalImportState(ctx, req.Context.WorkspaceID)
+		state, found, err := p.authorizedHistoricalImportState(ctx, req.Context.WorkspaceID)
 		if err != nil {
 			return nil, err
 		}
@@ -72,28 +88,45 @@ func (p *plugin) startHistoricalImport(ctx context.Context, workspaceID string) 
 		state := historicalImportState{WorkspaceID: workspaceID, Status: importStatusDisabled, Undated: true, LastError: "enable token statistics collection before importing history"}
 		return importJSONResponse(409, state)
 	}
-	state, found, err := p.loadHistoricalImportState(ctx, workspaceID)
+	p.importMu.Lock()
+	defer p.importMu.Unlock()
+	state, found, err := p.authorizedHistoricalImportState(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	if !found || state.Status == importStatusCompleted {
-		state = historicalImportState{WorkspaceID: workspaceID}
+	if found && p.importRunning && p.importWorkspace == workspaceID {
+		return importJSONResponse(202, state)
+	}
+	if !found || state.Status == importStatusCompleted || state.SchemaVersion != 2 {
+		state = historicalImportState{WorkspaceID: workspaceID, SchemaVersion: 2, DiagnosticsReliable: true}
+	}
+	if _, err := usageHistory(p.Host()); err != nil {
+		state.Status = importStatusUnsupported
+		state.LastError = err.Error()
+		return importJSONResponse(409, state)
+	}
+	if state.SnapshotID == "" {
+		reader, _ := usageHistory(p.Host())
+		query := pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: workspaceID, Limit: 1}
+		page, err := p.readUsageTargetPage(ctx, reader, query, 0)
+		if err != nil && !errors.Is(err, errUsageTargetsPreparing) {
+			return nil, historyError(err)
+		}
+		state.SnapshotID, state.SnapshotUpperBound = page.SnapshotID, page.SnapshotUpperBound
 	}
 	state.WorkspaceID = workspaceID
+	state.RunID = rand.Text()
 	state.Status = importStatusRunning
+	if state.SnapshotID == "" {
+		state.Status = importStatusPreparing
+	}
 	state.LastError = ""
 	state.FinishedAt = ""
 	if state.StartedAt == "" {
 		state.StartedAt = p.now().UTC().Format(time.RFC3339Nano)
 	}
-	if err := p.saveHistoricalImportState(ctx, workspaceID, state); err != nil {
+	if err := p.writeHistoricalImportState(ctx, workspaceID, state, true); err != nil {
 		return nil, err
-	}
-
-	p.importMu.Lock()
-	if p.importRunning && p.importWorkspace == workspaceID {
-		p.importMu.Unlock()
-		return importJSONResponse(202, state)
 	}
 	if p.importCancel != nil {
 		p.importCancel()
@@ -102,20 +135,21 @@ func (p *plugin) startHistoricalImport(ctx context.Context, workspaceID string) 
 	p.importRunning = true
 	p.importWorkspace = workspaceID
 	p.importCancel = cancel
-	p.importMu.Unlock()
-	go p.runHistoricalImport(importCtx, workspaceID)
+	p.importGeneration++
+	generation := p.importGeneration
+	go p.runHistoricalImportGeneration(importCtx, workspaceID, generation)
 	return importJSONResponse(202, state)
 }
 
 func (p *plugin) cancelHistoricalImport(ctx context.Context, workspaceID string) (*pluginsdk.PluginActionResponse, error) {
-	state, found, err := p.loadHistoricalImportState(ctx, workspaceID)
+	state, found, err := p.authorizedHistoricalImportState(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
 		return importJSONResponse(200, historicalImportState{WorkspaceID: workspaceID, Status: importStatusNotStarted, Undated: true})
 	}
-	if state.Status == importStatusRunning {
+	if state.Status == importStatusRunning || state.Status == importStatusPreparing {
 		state.Status = importStatusCancelled
 		state.FinishedAt = p.now().UTC().Format(time.RFC3339Nano)
 		state.LastError = ""
@@ -132,9 +166,13 @@ func (p *plugin) cancelHistoricalImport(ctx context.Context, workspaceID string)
 }
 
 func (p *plugin) runHistoricalImport(ctx context.Context, workspaceID string) {
+	p.runHistoricalImportGeneration(ctx, workspaceID, 0)
+}
+
+func (p *plugin) runHistoricalImportGeneration(ctx context.Context, workspaceID string, generation uint64) {
 	defer func() {
 		p.importMu.Lock()
-		if p.importWorkspace == workspaceID {
+		if p.importWorkspace == workspaceID && (generation == 0 || p.importGeneration == generation) {
 			p.importRunning = false
 			p.importWorkspace = ""
 			p.importCancel = nil
@@ -142,144 +180,314 @@ func (p *plugin) runHistoricalImport(ctx context.Context, workspaceID string) {
 		p.importMu.Unlock()
 	}()
 
+	initial, _, _ := p.loadHistoricalImportState(ctx, workspaceID)
+	runID := initial.RunID
+	finish := func(status string, err error) { p.finishHistoricalImportRun(workspaceID, status, err, runID) }
+
 	host := p.Host()
 	if host == nil {
-		p.finishHistoricalImport(workspaceID, importStatusFailed, errors.New("host unavailable"))
+		finish(importStatusFailed, errors.New("host unavailable"))
+		return
+	}
+	reader, err := usageHistory(host)
+	if err != nil {
+		finish(importStatusUnsupported, err)
 		return
 	}
 	for {
 		if ctx.Err() != nil {
-			p.finishHistoricalImport(workspaceID, importStatusCancelled, nil)
+			finish(importStatusCancelled, nil)
 			return
 		}
 		if !p.collectionEnabled(ctx) {
-			p.finishHistoricalImport(workspaceID, importStatusDisabled, errors.New("token statistics collection is disabled"))
+			finish(importStatusDisabled, errors.New("token statistics collection is disabled"))
 			return
 		}
 		state, found, err := p.loadHistoricalImportState(ctx, workspaceID)
 		if err != nil {
-			log.Printf("session-cost historical import state: %v", err)
+			log.Printf("historical import checkpoint: %v", err)
 			return
 		}
-		if !found {
-			state = historicalImportState{WorkspaceID: workspaceID, Status: importStatusRunning}
+		if !found || state.SchemaVersion != 2 {
+			state = historicalImportState{WorkspaceID: workspaceID, SchemaVersion: 2, Status: importStatusRunning, DiagnosticsReliable: true}
+		}
+		if state.RunID != runID {
+			return
 		}
 		if state.Status == importStatusCancelled {
 			return
 		}
-		page := pluginsdk.Page{Limit: importPageSize, Cursor: state.Cursor}
-		sessions, info, err := host.Sessions().List(ctx, pluginsdk.SessionFilter{WorkspaceIDs: []string{workspaceID}}, page)
-		if err != nil {
-			p.finishHistoricalImport(workspaceID, importStatusFailed, err)
-			return
-		}
-		if len(sessions) == 0 {
-			state.Status = importStatusCompleted
-			state.FinishedAt = p.now().UTC().Format(time.RFC3339Nano)
-			state.LastError = ""
-			_ = p.saveHistoricalImportState(ctx, workspaceID, state)
-			return
-		}
-
-		eligible := make([]pluginsdk.Session, 0, len(sessions))
-		for _, session := range sessions {
-			if session.ACPSessionID != "" {
-				eligible = append(eligible, session)
-			} else {
-				markMissingSession(&state, session.ID)
+		if state.SnapshotID != "" {
+			if scopeErr := p.validateUsageSnapshot(ctx, workspaceID, state.SnapshotID, state.SnapshotUpperBound); scopeErr != nil {
+				if usageScopeDenied(scopeErr) {
+					_, _, _ = p.authorizedHistoricalImportState(ctx, workspaceID)
+					return
+				}
+				finish(importFailureStatus(scopeErr), scopeErr)
+				return
 			}
 		}
-		if len(eligible) > 0 {
-			if len(state.Dates) == 0 {
-				state.Dates = historicalImportDates(eligible, p.now())
+		if state.PageFound == nil {
+			state.PageFound = make(map[string]bool)
+		}
+		if len(state.PageTargets) == 0 {
+			query := pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: workspaceID, Limit: importPageSize, SnapshotID: state.SnapshotID, Cursor: state.Cursor}
+			page, err := p.readUsageTargetPage(ctx, reader, query, state.SnapshotUpperBound)
+			if errors.Is(err, errUsageTargetsPreparing) {
+				state.Status = importStatusPreparing
 				if err := p.saveHistoricalImportState(ctx, workspaceID, state); err != nil {
-					log.Printf("session-cost historical import checkpoint: %v", err)
 					return
+				}
+				if !p.waitTargetPreparation(ctx) {
+					finish(importStatusCancelled, nil)
+					return
+				}
+				continue
+			}
+			if err != nil {
+				finish(importFailureStatus(err), historyError(err))
+				return
+			}
+			state.Status = importStatusRunning
+			state.SnapshotID = page.SnapshotID
+			state.SnapshotUpperBound = page.SnapshotUpperBound
+			state.PageTargets = page.Targets
+			state.PageNextCursor = page.NextCursor
+			state.PageHasMore = page.HasMore
+			state.PageDates = make(map[string][]string)
+			state.PageFound = make(map[string]bool)
+			state.PageMissingIDs = nil
+			var ids []string
+			for _, target := range page.Targets {
+				if !eligibleUsageSource(target) {
+					finish(importStatusUnsupported, errUsageSourceUnavailable)
+					return
+				}
+				if target.SessionID != nil && target.ExternalSessionID != nil && len(trustedTargetDateRange(target)) == 0 {
+					ids = append(ids, *target.SessionID)
 				}
 			}
-			if len(state.Dates) > 0 {
-				date := state.Dates[0]
-				warn, high := p.configuredThresholds(ctx)
-				cmd := resolveCommand(p.configuredCommand(ctx), p.lookPath)
-				runCtx, cancel := context.WithTimeout(ctx, reportTimeout)
-				entries, reportErr := p.runDatedReport(runCtx, cmd, date, date)
-				cancel()
-				if reportErr != nil {
-					p.finishHistoricalImport(workspaceID, importStatusFailed, reportErr)
+			live := make(map[string]pluginsdk.Session)
+			if len(ids) > 0 {
+				sessions, _, readErr := host.Sessions().List(ctx, pluginsdk.SessionFilter{WorkspaceIDs: []string{workspaceID}, SessionIDs: ids}, pluginsdk.Page{Limit: importPageSize})
+				if readErr == nil {
+					for _, session := range sessions {
+						live[session.ID] = session
+					}
+				}
+			}
+			for _, target := range page.Targets {
+				if err := p.rememberUsageTarget(ctx, workspaceID, target, page); err != nil {
+					finish(importStatusFailed, err)
 					return
 				}
-				missingSessions := make(map[string]bool)
-				for _, session := range eligible {
-					if !containsDate(historicalSessionDates(session, p.now()), date) {
-						continue
+				if target.ExternalSessionID == nil || *target.ExternalSessionID == "" {
+					continue
+				}
+				dates := trustedTargetDateRange(target)
+				if len(dates) == 0 && target.SessionID != nil {
+					if session, ok := live[*target.SessionID]; ok {
+						dates = historicalSessionDates(session, p.now())
 					}
-					response := responseForEntries(session.ID, session.ACPSessionID, entries, warn, high, p.now())
-					if !response.Found {
-						missingSessions[session.ID] = true
-						continue
-					}
-					if err := p.persistSessionUsageWithCoverage(ctx, workspaceID, session.TaskID, session.ID, &response, usageCoverage{Date: date, Timezone: sourceTimezone()}); err != nil {
-						p.finishHistoricalImport(workspaceID, importStatusFailed, err)
+				}
+				if len(dates) == 0 {
+					dates = []string{""}
+				}
+				if len(dates) > 1 {
+					state.PageDates[target.SubjectBinding] = []string{dates[0], dates[len(dates)-1]}
+				} else {
+					state.PageDates[target.SubjectBinding] = dates
+				}
+			}
+			state.Dates = nil
+			if date, ok := nextHistoricalImportDate(state.PageDates, nil); ok {
+				state.Dates = []string{date}
+			}
+			// Persist the exact page and snapshot before starting a report. Deletion
+			// cannot change the target membership or dates of a resumed page.
+			if err := p.saveHistoricalImportState(ctx, workspaceID, state); err != nil {
+				return
+			}
+		}
+		if len(state.Dates) > 0 {
+			date := state.Dates[0]
+			for i, target := range state.PageTargets {
+				if target.SessionID != nil && target.ExternalSessionID != nil && targetIncludesDate(state.PageDates[target.SubjectBinding], date) {
+					current, err := p.currentSourceTarget(ctx, workspaceID, target.TaskID, *target.SessionID, *target.ExternalSessionID, target.SubjectBinding)
+					if err != nil {
+						finish(importFailureStatus(err), err)
 						return
 					}
-					state.Undated = false
+					// Only the current Host response supplies source authority.
+					// A checkpoint from before this field existed can resume after
+					// that response explicitly authorizes the same retained binding.
+					state.PageTargets[i] = current
 				}
-				for sessionID := range missingSessions {
-					markMissingSession(&state, sessionID)
+			}
+			warn, high := p.configuredThresholds(ctx)
+			cmd := resolveCommand(p.configuredCommand(ctx), p.lookPath)
+			runCtx, cancel := context.WithTimeout(ctx, reportTimeout)
+			var entries []sessionModelEntry
+			if date == "" {
+				entries, err = p.runReport(runCtx, cmd)
+			} else {
+				entries, err = p.runDatedReport(runCtx, cmd, date, date)
+			}
+			cancel()
+			if ctx.Err() != nil {
+				finish(importStatusCancelled, nil)
+				return
+			}
+			if !p.collectionEnabled(ctx) {
+				finish(importStatusDisabled, errUsageCollectionDisabled)
+				return
+			}
+			if err != nil {
+				finish(importStatusFailed, err)
+				return
+			}
+			if scopeErr := p.validateUsageSnapshot(ctx, workspaceID, state.SnapshotID, state.SnapshotUpperBound); scopeErr != nil {
+				return
+			}
+			for _, target := range state.PageTargets {
+				if !targetIncludesDate(state.PageDates[target.SubjectBinding], date) {
+					continue
 				}
-				state.Dates = state.Dates[1:]
-				state.LastSuccessfulAt = p.now().UTC().Format(time.RFC3339Nano)
-				state.LastError = ""
-				if err := p.saveHistoricalImportState(ctx, workspaceID, state); err != nil {
-					log.Printf("session-cost historical import checkpoint: %v", err)
+				if !eligibleUsageSource(target) || target.ExternalSessionID == nil || target.SessionID == nil {
+					finish(importStatusUnsupported, errUsageSourceUnavailable)
 					return
 				}
-				if len(state.Dates) > 0 {
-					if !p.waitImportBudget(ctx) {
+				if err := p.preflightSource(ctx, workspaceID, target.TaskID, *target.SessionID, *target.ExternalSessionID, target.SubjectBinding); err != nil {
+					finish(importFailureStatus(err), err)
+					return
+				}
+				sessionID := ""
+				if target.SessionID != nil {
+					sessionID = *target.SessionID
+				}
+				response := responseForEntries(sessionID, *target.ExternalSessionID, entries, warn, high, p.now())
+				if !response.Found {
+					coverage := usageCoverage{}
+					if date != "" {
+						coverage = usageCoverage{Date: date, Timezone: sourceTimezone()}
+					}
+					if err := p.checkTokscaleSnapshotCoverage(ctx, &response, coverage); err != nil {
+						finish(importFailureStatus(err), err)
 						return
 					}
 					continue
 				}
+				coverage := usageCoverage{}
+				if date != "" {
+					coverage = usageCoverage{Date: date, Timezone: sourceTimezone()}
+				}
+				if err := p.persistTargetUsage(ctx, target, &response, coverage); err != nil {
+					finish(importFailureStatus(err), err)
+					return
+				}
+				state.PageFound[target.SubjectBinding] = true
+				if date == "" {
+					state.Undated = true
+				}
+			}
+			state.Dates = state.Dates[1:]
+			if len(state.Dates) == 0 {
+				if next, ok := nextHistoricalImportDate(state.PageDates, &date); ok {
+					state.Dates = []string{next}
+				}
+			}
+			state.LastSuccessfulAt = p.now().UTC().Format(time.RFC3339Nano)
+			if err := p.saveHistoricalImportState(ctx, workspaceID, state); err != nil {
+				return
+			}
+			if len(state.Dates) > 0 {
+				if !p.waitImportBudget(ctx) {
+					finish(importStatusCancelled, nil)
+					return
+				}
+				continue
 			}
 		}
-
-		state.Processed += len(sessions)
+		for _, target := range state.PageTargets {
+			if !state.PageFound[target.SubjectBinding] {
+				sample := target.SubjectBinding
+				if target.SessionID != nil {
+					sample = *target.SessionID
+				}
+				markMissingTarget(&state, target.SubjectBinding, sample)
+			}
+		}
+		state.Processed += len(state.PageTargets)
+		state.Cursor = state.PageNextCursor
+		state.PageTargets = nil
+		state.PageDates = nil
+		state.PageFound = nil
+		state.PageMissingIDs = nil
 		state.LastSuccessfulAt = p.now().UTC().Format(time.RFC3339Nano)
 		state.LastError = ""
-		state.Status = importStatusRunning
-		if info == nil || !info.HasMore || info.NextCursor == "" {
-			state.Cursor = ""
+		if !state.PageHasMore {
 			state.Status = importStatusCompleted
-			state.FinishedAt = p.now().UTC().Format(time.RFC3339Nano)
+			state.FinishedAt = state.LastSuccessfulAt
 		} else {
-			state.Cursor = info.NextCursor
+			state.Status = importStatusRunning
 		}
-		state.Dates = nil
 		if err := p.saveHistoricalImportState(ctx, workspaceID, state); err != nil {
-			log.Printf("session-cost historical import checkpoint: %v", err)
 			return
 		}
 		if state.Status == importStatusCompleted {
 			return
 		}
 		if !p.waitImportBudget(ctx) {
+			finish(importStatusCancelled, nil)
 			return
 		}
 	}
 }
 
+func importFailureStatus(err error) string {
+	if errors.Is(err, errUsageCollectionDisabled) {
+		return importStatusDisabled
+	}
+	if errors.Is(historyError(err), errUsageHistoryUnsupported) {
+		return importStatusUnsupported
+	}
+	if errors.Is(err, errUsageSourceUnavailable) {
+		return importStatusUnsupported
+	}
+	return importStatusFailed
+}
+
+func (p *plugin) waitTargetPreparation(ctx context.Context) bool {
+	if p.importWait != nil {
+		return p.importWait(ctx)
+	}
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 func markMissingSession(state *historicalImportState, sessionID string) {
+	markMissingTarget(state, sessionID, sessionID)
+}
+
+func markMissingTarget(state *historicalImportState, sessionID, sample string) {
 	if sessionID == "" {
 		return
 	}
-	for _, existing := range state.MissingSessionIDs {
+	for _, existing := range state.PageMissingIDs {
 		if existing == sessionID {
 			return
 		}
 	}
+	state.PageMissingIDs = append(state.PageMissingIDs, sessionID)
 	state.Missing++
 	if len(state.MissingSessionIDs) < maxMissingSessionIDs {
-		state.MissingSessionIDs = append(state.MissingSessionIDs, sessionID)
+		state.MissingSessionIDs = append(state.MissingSessionIDs, sample)
 	}
 }
 
@@ -330,10 +538,13 @@ func historicalSessionDates(session pluginsdk.Session, now time.Time) []string {
 }
 
 func (p *plugin) finishHistoricalImport(workspaceID, status string, importErr error) {
+	p.finishHistoricalImportRun(workspaceID, status, importErr, "")
+}
+func (p *plugin) finishHistoricalImportRun(workspaceID, status string, importErr error, runID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	state, found, err := p.loadHistoricalImportState(ctx, workspaceID)
-	if err != nil || !found {
+	if err != nil || !found || (runID != "" && state.RunID != runID) {
 		return
 	}
 	if state.Status == importStatusCancelled {
@@ -369,6 +580,10 @@ func (p *plugin) loadHistoricalImportState(ctx context.Context, workspaceID stri
 		return historicalImportState{}, false, fmt.Errorf("decode historical import state: %w", err)
 	}
 	state.WorkspaceID = workspaceID
+	if state.SchemaVersion != 2 {
+		state.DiagnosticsReliable = false
+		state.LegacyDiagnostics = true
+	}
 	if state.Status == "" {
 		state.Status = importStatusNotStarted
 	}
@@ -376,6 +591,26 @@ func (p *plugin) loadHistoricalImportState(ctx context.Context, workspaceID stri
 }
 
 func (p *plugin) saveHistoricalImportState(ctx context.Context, workspaceID string, state historicalImportState) error {
+	return p.writeHistoricalImportState(ctx, workspaceID, state, false)
+}
+func (p *plugin) writeHistoricalImportState(ctx context.Context, workspaceID string, state historicalImportState, starting bool) error {
+	p.importStateMu.Lock()
+	defer p.importStateMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if p.importRevoked[stableUsageID(workspaceID, state.RunID)] {
+		return context.Canceled
+	}
+	if !starting {
+		old, found, err := p.loadHistoricalImportState(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		if found && ((old.RunID != "" && old.RunID != state.RunID) || (old.Status == importStatusCancelled && state.Status != importStatusCancelled)) {
+			return context.Canceled
+		}
+	}
 	host := p.Host()
 	if host == nil {
 		return errors.New("host unavailable")
@@ -393,6 +628,9 @@ func (p *plugin) saveHistoricalImportState(ctx context.Context, workspaceID stri
 }
 
 func importJSONResponse(status int, body any) (*pluginsdk.PluginActionResponse, error) {
+	if state, ok := body.(historicalImportState); ok {
+		body = publicImportView(state)
+	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -401,6 +639,9 @@ func importJSONResponse(status int, body any) (*pluginsdk.PluginActionResponse, 
 }
 
 func (p *plugin) waitImportBudget(ctx context.Context) bool {
+	if p.importWait != nil {
+		return p.importWait(ctx)
+	}
 	timer := time.NewTimer(p.collectionInterval(ctx))
 	defer timer.Stop()
 	select {
@@ -409,4 +650,14 @@ func (p *plugin) waitImportBudget(ctx context.Context) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+func targetIncludesDate(dates []string, date string) bool {
+	if len(dates) == 0 {
+		return false
+	}
+	if len(dates) == 1 {
+		return dates[0] == date
+	}
+	return date >= dates[0] && date <= dates[len(dates)-1]
 }

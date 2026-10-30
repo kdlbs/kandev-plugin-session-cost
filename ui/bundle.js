@@ -23,6 +23,16 @@ var MODEL_DOTS = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf
 var TRANSLATIONS = {
   en: {
     requestFailed: "Couldn't load or refresh cost. Try again.",
+    usageUpgrade: "Upgrade Kandev to save retained usage. Previous saved usage is preserved.",
+    canonicalPending: "Saved usage is updating. Showing the last completed selection.",
+    canonicalPreparing: "Saved usage is preparing.",
+    savedQueryRejected: "Kandev rejected the saved usage query. Reload Session Cost to try again.",
+    usageAccessDenied: "Saved usage is no longer accessible.",
+    sourceContextUnavailable: "Source usage is unavailable for this retained scope. Saved usage remains authoritative.",
+    sourceContextPreparing: "Source eligibility is preparing. Saved usage remains authoritative.",
+    sourceMembershipChanged: "Source model groups changed. Saved usage is preserved. Restore the previous source grouping and refresh.",
+    importPreparing: "Preparing historical source metadata.",
+    estimatedCost: "Estimated cost",
     updateFailed: "Couldn't refresh cost. Showing the previous result. Try again.",
     reportFailed: "Couldn't update cost. Try again.",
     reportTimeout: "The cost report took too long. Try again.",
@@ -60,6 +70,18 @@ var TRANSLATIONS = {
   },
   "pt-pt": {
     requestFailed: "Não foi possível carregar ou atualizar o custo. Tente novamente.",
+    importUnsupported: "Atualize o Kandev para importar o histórico de utilização.",
+    importLegacyDiagnostics: "A importação anterior usou contagens de sessões em falta que não são fiáveis. Inicie uma nova importação para obter contagens exatas.",
+    usageUpgrade: "Atualize o Kandev para guardar o histórico de utilização. A utilização guardada é preservada.",
+    canonicalPending: "A utilização guardada está a ser atualizada. A mostrar a última seleção concluída.",
+    canonicalPreparing: "A utilização guardada está a ser preparada.",
+    savedQueryRejected: "O Kandev rejeitou a consulta de utilização guardada. Volte a carregar o Session Cost para tentar novamente.",
+    usageAccessDenied: "A utilização guardada já não está acessível.",
+    sourceContextUnavailable: "A utilização da origem não está disponível para este âmbito guardado. A utilização guardada mantém-se como referência.",
+    sourceContextPreparing: "A elegibilidade da origem está a ser preparada. A utilização guardada mantém-se como referência.",
+    sourceMembershipChanged: "Os grupos de modelos da origem mudaram. A utilização guardada é preservada. Reponha o agrupamento anterior e atualize.",
+    importPreparing: "A preparar os metadados das origens do histórico.",
+    estimatedCost: "Custo estimado",
     updateFailed: "Não foi possível atualizar o custo. A mostrar o resultado anterior. Tente novamente.",
     reportFailed: "Não foi possível atualizar o custo. Tente novamente.",
     reportTimeout: "O relatório de custos demorou demasiado tempo. Tente novamente.",
@@ -161,6 +183,15 @@ function fmtCompact(n) {
   return String(v);
 }
 
+function tokenText(data, field, t) {
+  var amounts = data && data.token_amounts;
+  if (amounts && Object.prototype.hasOwnProperty.call(amounts, field)) {
+    if (amounts[field] === null) return translate(t, "unavailable");
+    if (data[field] === null) return String(amounts[field]).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+  return fmtCompact(data[field]);
+}
+
 // ---- icon -----------------------------------------------------------------
 function coinsIcon(h, size, color) {
   var s = size || 16;
@@ -247,6 +278,7 @@ function costCard(h, d, t, status) {
     ),
   ];
 
+  if (d.cost_basis === "estimated") rows.push(h("div", { style: { fontSize: "11px", opacity: 0.7 } }, translate(t, "estimatedCost")));
   if (status) rows.push(h("div", {style: {fontSize: "11px"}}, status));
 
   // Cost / turn — the headline secondary metric, computed server-side.
@@ -278,12 +310,12 @@ function costCard(h, d, t, status) {
     h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "2px" } },
-      statRow(h, translate(t, "input"), fmtCompact(d.input)),
-      statRow(h, translate(t, "output"), fmtCompact(d.output)),
-      statRow(h, translate(t, "cacheRead"), fmtCompact(d.cache_read)),
-      statRow(h, translate(t, "cacheWrite"), fmtCompact(d.cache_write)),
-      statRow(h, translate(t, "reasoning"), fmtCompact(d.reasoning)),
-      statRow(h, translate(t, "total"), fmtCompact(d.total)),
+      statRow(h, translate(t, "input"), tokenText(d, "input", t)),
+      statRow(h, translate(t, "output"), tokenText(d, "output", t)),
+      statRow(h, translate(t, "cacheRead"), tokenText(d, "cache_read", t)),
+      statRow(h, translate(t, "cacheWrite"), tokenText(d, "cache_write", t)),
+      statRow(h, translate(t, "reasoning"), tokenText(d, "reasoning", t)),
+      statRow(h, translate(t, "total"), tokenText(d, "total", t)),
     ),
   );
 
@@ -319,7 +351,7 @@ function costCard(h, d, t, status) {
                   m.model,
                 ),
               ),
-              h("span", { style: { fontVariantNumeric: "tabular-nums" } }, costText(d, m.cost, undefined, t)),
+              h("span", { style: { fontVariantNumeric: "tabular-nums" } }, costText(Object.assign({}, d, m), m.cost, undefined, t)),
             ),
             h(
               "div",
@@ -340,17 +372,17 @@ function costCard(h, d, t, status) {
               h(
                 "span",
                 { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "left" } },
-                translate(t, "modelInput", { values: { count: fmtCompact(m.input) } }),
+                translate(t, "modelInput", { values: { count: tokenText(m, "input", t) } }),
               ),
               h(
                 "span",
                 { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "center" } },
-                translate(t, "modelOutput", { values: { count: fmtCompact(m.output) } }),
+                translate(t, "modelOutput", { values: { count: tokenText(m, "output", t) } }),
               ),
               h(
                 "span",
                 { style: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", textAlign: "right" } },
-                translate(t, "modelCacheRead", { values: { count: fmtCompact(m.cache_read) } }),
+                translate(t, "modelCacheRead", { values: { count: tokenText(m, "cache_read", t) } }),
               ),
             ),
           );
@@ -427,7 +459,9 @@ function tooltipBody(h, ui, state, t) {
   var hasCost = d && d.found && !(d.tokscale && d.tokscale.installed === false);
   var status = null;
   if (state.error) {
-    status = state.error === "poll_timeout"
+    status = state.error === "access_denied"
+      ? translate(t, "usageAccessDenied")
+      : state.error === "poll_timeout"
       ? translate(t, hasCost ? "pollingTimeoutPrevious" : "pollingTimeout")
       : state.error === "request_timeout"
         ? translate(t, hasCost ? "updateFailed" : "requestTimeout")
@@ -440,7 +474,11 @@ function tooltipBody(h, ui, state, t) {
     status = translate(t, "updatingCost");
   } else if (d && d.report_state === "failed") {
     var reportErrorKey =
-      d.report_error === "timeout"
+      d.report_error === "access_denied"
+        ? "usageAccessDenied"
+        : d.report_error === "invalid_query"
+        ? "savedQueryRejected"
+        : d.report_error === "timeout"
         ? "reportTimeout"
         : d.report_error === "unavailable"
           ? "reportUnavailable"
@@ -449,7 +487,12 @@ function tooltipBody(h, ui, state, t) {
       ? translate(t, "updateFailed")
       : translate(t, reportErrorKey);
   }
-  if ((state.loading || state.pending) && !hasCost && !state.error && (!d || d.report_state !== "failed")) {
+  if (d && d.compatibility === "upgrade_required") status = translate(t, "usageUpgrade");
+  else if (d && d.compatibility === "source_context_unavailable") status = translate(t, "sourceContextUnavailable");
+  else if (d && d.compatibility === "source_context_preparing") status = translate(t, "sourceContextPreparing");
+  else if (d && d.compatibility === "source_membership_ambiguous") status = translate(t, "sourceMembershipChanged");
+  else if (d && d.canonical_pending) status = translate(t, d.found ? "canonicalPending" : "canonicalPreparing");
+  if ((state.loading || state.pending) && !hasCost && !state.error && (!d || (d.report_state !== "failed" && !d.canonical_pending && d.compatibility !== "upgrade_required" && d.compatibility !== "source_context_preparing"))) {
     return stateShell(
       h,
       header,
@@ -496,10 +539,28 @@ function validNumber(value) {
   return typeof value === "number" && isFinite(value) && value >= 0;
 }
 
+function validToken(data, field) {
+  if (Number.isSafeInteger(data[field]) && data[field] >= 0) return true;
+  return data[field] === null && data.token_amounts &&
+    Object.prototype.hasOwnProperty.call(data.token_amounts, field) &&
+    (data.token_amounts[field] === null || /^(0|[1-9][0-9]*)$/.test(data.token_amounts[field]));
+}
+
 function validateCostResponse(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("invalid_response");
   var state = data.report_state === undefined ? "ready" : data.report_state;
   if (!["ready", "pending", "failed"].includes(state)) throw new Error("invalid_response");
+  ["projection_status", "projection_generation", "pending_projection_generation"].forEach(function (field) {
+    if (data[field] !== undefined && typeof data[field] !== "string") throw new Error("invalid_response");
+  });
+  ["projection_pending", "canonical_pending"].forEach(function (field) {
+    if (data[field] !== undefined && typeof data[field] !== "boolean") throw new Error("invalid_response");
+  });
+  if (data.canonical_pending === true || data.projection_pending === true ||
+      (data.projection_status !== undefined && !["", "ready"].includes(data.projection_status))) {
+    data.canonical_pending = true;
+    state = "pending";
+  }
   if (typeof data.found !== "boolean" || typeof data.acp_session_id !== "string") throw new Error("invalid_response");
   if (data.stale !== undefined && typeof data.stale !== "boolean") throw new Error("invalid_response");
   if (data.report_error !== undefined && typeof data.report_error !== "string") throw new Error("invalid_response");
@@ -509,9 +570,10 @@ function validateCostResponse(data) {
   }
   if (data.models !== undefined && !Array.isArray(data.models)) throw new Error("invalid_response");
   if (data.found) {
-    ["cost", "turns", "input", "output", "cache_read"].forEach(function (field) {
-      if (!validNumber(data[field])) throw new Error("invalid_response");
+    ["turns", "input", "output", "cache_read"].forEach(function (field) {
+      if (!validToken(data, field)) throw new Error("invalid_response");
     });
+    if (!validNumber(data.cost)) throw new Error("invalid_response");
     if (data.turns > 0 && !validNumber(data.cost_per_turn)) throw new Error("invalid_response");
     if (!Array.isArray(data.models)) throw new Error("invalid_response");
     ["warn_threshold", "high_threshold"].forEach(function (field) {
@@ -519,8 +581,9 @@ function validateCostResponse(data) {
     });
     data.models.forEach(function (model) {
       if (!model || typeof model !== "object" || Array.isArray(model) || typeof model.model !== "string") throw new Error("invalid_response");
-      ["cost", "input", "output", "cache_read"].forEach(function (field) {
-        if (!validNumber(model[field])) throw new Error("invalid_response");
+      if (!validNumber(model.cost)) throw new Error("invalid_response");
+      ["input", "output", "cache_read"].forEach(function (field) {
+        if (!validToken(model, field)) throw new Error("invalid_response");
       });
     });
   }
@@ -742,14 +805,16 @@ function makeSessionCostAction(host) {
         fetchPromise = host.api.invokeAction
           ? Promise.resolve(host.api.invokeAction("session-usage", {taskId: ctx.taskId || undefined, sessionId: active, body: {refresh: Boolean(force)}}, fetchOptions)).then(function(data) {return {ok: true, headers: {get: function(){return "application/json";}}, json: function(){return Promise.resolve(data);}};})
           : host.api.fetch(qs, fetchOptions);
-      } catch {
-        fetchPromise = Promise.reject(new Error("request_failed"));
+      } catch (error) {
+        fetchPromise = Promise.reject(error);
       }
       Promise.resolve(fetchPromise)
         .then(function (r) {
           if (!r || typeof r.json !== "function") throw new Error("invalid_response");
           if (r.ok === false || (typeof r.status === "number" && (r.status < 200 || r.status >= 300))) {
-            throw new Error("request_failed");
+            var responseError = new Error("request_failed");
+            responseError.status = r.status;
+            throw responseError;
           }
           var contentType = r.headers && typeof r.headers.get === "function" ? r.headers.get("content-type") : "";
           if (typeof contentType !== "string" || !/^application\/(?:json|[a-z0-9!#$&^_.+-]+\+json)(?:\s*;|$)/i.test(contentType)) {
@@ -781,22 +846,23 @@ function makeSessionCostAction(host) {
             };
           });
         })
-        .catch(function () {
+        .catch(function (error) {
           if (!isCurrent()) return;
           clearRequestTimer();
           requestRef.current = null;
           loadedForRef.current = active;
           clearPollDeadline();
           if (controller) controller.abort();
+          var denied = error && [401, 403, 404].includes(error.status);
           setState(function (current) {
             if (current.sessionId !== active) return current;
             return {
               sessionId: active,
               loading: false,
               pending: false,
-              stale: Boolean(current.data) || current.stale,
-              data: current.data,
-              error: "request_failed",
+              stale: denied ? false : Boolean(current.data) || current.stale,
+              data: denied ? null : current.data,
+              error: denied ? "access_denied" : "request_failed",
             };
           });
         });
@@ -967,10 +1033,13 @@ var IMPORT_TRANSLATIONS = {
     importNoWorkspace: "No workspace is available.",
     importNotStarted: "History has not been imported.",
     importRunning: "Import is running.",
+    importPreparing: "Preparing historical source metadata.",
     importCompleted: "Import completed.",
     importFailed: "Import failed.",
     importCancelled: "Import was cancelled.",
     importDisabled: "Enable statistics collection before importing history.",
+    importUnsupported: "Upgrade Kandev to import retained usage.",
+    importLegacyDiagnostics: "The previous import used unreliable missing-session diagnostics. Start a new import for exact counts.",
     importProcessed: "Processed {{count}} sessions",
     importMissing: "{{count}} sessions have no matching tokscale usage.",
     importUndated: "Some lifetime usage has no source date and stays outside dated charts.",
@@ -985,6 +1054,8 @@ var IMPORT_TRANSLATIONS = {
 
 function importStatusKey(status) {
   switch (status) {
+    case "preparing":
+      return "importPreparing";
     case "running":
       return "importRunning";
     case "completed":
@@ -995,6 +1066,8 @@ function importStatusKey(status) {
       return "importCancelled";
     case "disabled":
       return "importDisabled";
+    case "unsupported":
+      return "importUnsupported";
     default:
       return "importNotStarted";
   }
@@ -1084,7 +1157,7 @@ function makeHistoricalImportSettings(host) {
             if (cancelled) return;
             setStatus(next || null);
             setLoading(false);
-            if (next && next.status === "running") {
+            if (next && (next.status === "running" || next.status === "preparing")) {
               timer = setTimeout(function () { setPoll(function (value) { return value + 1; }); }, 2000);
             }
           })
@@ -1117,7 +1190,7 @@ function makeHistoricalImportSettings(host) {
         .then(function () { setBusy(false); });
     }
 
-    var running = Boolean(status && status.status === "running");
+    var running = Boolean(status && (status.status === "running" || status.status === "preparing"));
     var statusMessage = status
       ? importTranslation(t, importStatusKey(status.status))
       : importTranslation(t, "importNotStarted");
@@ -1146,10 +1219,10 @@ function makeHistoricalImportSettings(host) {
               importTranslation(t, "importWorking"))
           : h("div", { style: { fontSize: "13px" } }, statusMessage),
         running && Progress ? h(Progress, { "aria-label": statusMessage }) : null,
-        status && status.status !== "not_started"
+        status && status.status !== "not_started" && status.status !== "preparing"
           ? h("div", { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px", opacity: 0.75 } },
               h("span", null, importTranslation(t, "importProcessed", { count: processed })),
-              missing > 0 ? h("span", null, importTranslation(t, "importMissing", { count: missing })) : null,
+              status.diagnostics_reliable === false ? h("span", null, importTranslation(t, "importLegacyDiagnostics")) : missing > 0 ? h("span", null, importTranslation(t, "importMissing", { count: missing })) : null,
               status.last_successful_at
                 ? h("span", null, importTranslation(t, "importLastSuccessful", { value: status.last_successful_at }))
                 : null,

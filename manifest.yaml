@@ -44,15 +44,16 @@ actions:
 
 webhooks:
   - key: "session-cost"
-    description: "Cost of the active chat session as JSON (GET; ?task_id=&active=)"
+    description: "Compatibility guidance only; use the authenticated session-usage action to view or refresh usage."
     method: "GET"
+    access: "authenticated"
 
 ui:
   bundle: "/ui/bundle.js"
 
-# Operator settings (Settings > Plugins > Session Cost). Read through the Host
-# GetConfig RPC on every webhook call; kandev restarts the plugin whenever the
-# operator saves, so changes take effect immediately.
+# Operator settings (Settings > Plugins > Session Cost). Usage actions and
+# collection passes read them through Host GetConfig; Kandev restarts the
+# plugin after a save so changes take effect immediately.
 config_schema:
   type: object
   properties:

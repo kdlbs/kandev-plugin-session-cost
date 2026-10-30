@@ -3,18 +3,20 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const (
 	defaultCollectionInterval  = 5 * time.Minute
 	maxFinalCollectionAttempts = 3
+	maxObservedRolloverDays    = 3
 	collectorStateScope        = "plugin"
 	collectorStateID           = "collector"
 	collectorStateKey          = "checkpoint"
@@ -28,14 +30,17 @@ type collectorCheckpoint struct {
 }
 
 type collectorPending struct {
-	TaskID       string         `json:"task_id"`
-	WorkspaceID  string         `json:"workspace_id"`
-	ACPSessionID string         `json:"acp_session_id"`
-	State        string         `json:"state"`
-	UpdatedAt    string         `json:"updated_at,omitempty"`
-	Attempts     int            `json:"attempts,omitempty"`
-	Dates        []string       `json:"dates,omitempty"`
-	DateAttempts map[string]int `json:"date_attempts,omitempty"`
+	ActiveDate     string         `json:"active_date,omitempty"`
+	RolloverDates  []string       `json:"rollover_dates,omitempty"`
+	SubjectBinding string         `json:"subject_binding,omitempty"`
+	TaskID         string         `json:"task_id"`
+	WorkspaceID    string         `json:"workspace_id"`
+	ACPSessionID   string         `json:"acp_session_id"`
+	State          string         `json:"state"`
+	UpdatedAt      string         `json:"updated_at,omitempty"`
+	Attempts       int            `json:"attempts,omitempty"`
+	Dates          []string       `json:"dates,omitempty"`
+	DateAttempts   map[string]int `json:"date_attempts,omitempty"`
 }
 
 func (p *plugin) collectionEnabled(ctx context.Context) bool {
@@ -117,6 +122,20 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 	if checkpoint.Pending == nil {
 		checkpoint.Pending = make(map[string]collectorPending)
 	}
+	liveIDs := make(map[string]bool)
+	for _, session := range sessions {
+		liveIDs[session.ID] = true
+	}
+	for id, pending := range checkpoint.Pending {
+		if liveIDs[id] || pending.SubjectBinding == "" {
+			continue
+		}
+		state := pending.State
+		if isActiveState(state) {
+			state = "COMPLETED"
+		}
+		sessions = append(sessions, pluginsdk.Session{ID: id, TaskID: pending.TaskID, ACPSessionID: pending.ACPSessionID, State: state, UpdatedAt: pending.UpdatedAt})
+	}
 	eligible := make([]pluginsdk.Session, 0, len(sessions))
 	for _, session := range sessions {
 		if session.ACPSessionID == "" {
@@ -130,7 +149,6 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 			}
 			if stateChanged {
 				pending.Attempts = 0
-				pending.DateAttempts = nil
 			}
 			if pending.Attempts >= maxFinalCollectionAttempts && len(pending.Dates) == 0 {
 				continue
@@ -142,20 +160,36 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 		pending.ACPSessionID = session.ACPSessionID
 		pending.State = session.State
 		pending.UpdatedAt = session.UpdatedAt
-		if !hasPending || stateChanged {
-			// Scheduled collection owns the current active snapshot and the
-			// terminal session's final day. Older days are explicit historical
-			// import work; queueing them here would make enablement look like an
-			// implicit history scan.
-			pending.Dates = collectorSessionDates(session, now)
-		} else if isActiveState(session.State) {
-			// An active session is sampled once for the current source-local day
-			// on every tick. Replace an old checkpoint day at a date boundary so
-			// a long lived session cannot starve current usage with backfill.
+		if isActiveState(session.State) {
 			currentDate := collectionDate(now)
-			if len(pending.Dates) != 1 || pending.Dates[0] != currentDate {
-				pending.Dates = []string{currentDate}
-				pending.DateAttempts = nil
+			if pending.ActiveDate != "" && pending.ActiveDate != currentDate {
+				addObservedRollover(&pending, pending.ActiveDate)
+			}
+			pending.ActiveDate = currentDate
+			pending.Dates = append([]string{currentDate}, pending.RolloverDates...)
+		} else if !hasPending || stateChanged {
+			if pending.ActiveDate != "" {
+				addObservedRollover(&pending, pending.ActiveDate)
+				pending.ActiveDate = ""
+			}
+			pending.Dates = collectorSessionDates(session, now)
+			for _, date := range pending.RolloverDates {
+				if !containsDate(pending.Dates, date) {
+					pending.Dates = append(pending.Dates, date)
+				}
+			}
+		}
+		if pending.SubjectBinding == "" {
+			if _, ok := pluginsdk.HostUsageHistory(host); ok {
+				task, taskErr := host.Tasks().Get(ctx, session.TaskID)
+				if taskErr == nil && task != nil {
+					target, targetErr := p.resolveUsageTarget(ctx, task.WorkspaceID, session.TaskID, session.ID, session.ACPSessionID)
+					if targetErr != nil {
+						return targetErr
+					}
+					pending.SubjectBinding = target.SubjectBinding
+					pending.WorkspaceID = task.WorkspaceID
+				}
 			}
 		}
 		checkpoint.Pending[session.ID] = pending
@@ -172,34 +206,61 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 	if err := p.saveCollectorCheckpoint(ctx, host, checkpoint); err != nil {
 		return err
 	}
+	for _, session := range eligible {
+		pending := checkpoint.Pending[session.ID]
+		if err := p.preflightSource(ctx, pending.WorkspaceID, session.TaskID, session.ID, session.ACPSessionID); err != nil {
+			return err
+		}
+	}
 	warn, high := p.configuredThresholds(ctx)
 	cmd := resolveCommand(p.configuredCommand(ctx), p.lookPath)
 	runCtx, cancel := context.WithTimeout(ctx, reportTimeout)
 	entries, err := p.runReport(runCtx, cmd)
 	cancel()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if !p.collectionEnabled(ctx) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 	for _, session := range eligible {
 		response := responseForEntries(session.ID, session.ACPSessionID, entries, warn, high, p.now())
+		if !response.Found {
+			if err := p.checkTokscaleSnapshotCoverage(ctx, &response, usageCoverage{}); err != nil {
+				return err
+			}
+		}
 		if response.Found {
-			task, taskErr := host.Tasks().Get(ctx, session.TaskID)
-			if taskErr != nil {
-				return taskErr
+			pending, err := p.persistCollectorUsage(ctx, checkpoint.Pending[session.ID], session, &response, usageCoverage{})
+			if err != nil {
+				return err
 			}
-			if task != nil {
-				if persistErr := p.persistSessionUsage(ctx, task.WorkspaceID, session.TaskID, session.ID, &response); persistErr != nil {
-					return persistErr
-				}
-			}
+			checkpoint.Pending[session.ID] = pending
 		}
 	}
 
 	date := nextCollectionDate(checkpoint.Pending, eligible, checkpoint.LastDate)
 	if date != "" {
+		for _, session := range eligible {
+			pending := checkpoint.Pending[session.ID]
+			if containsDate(pending.Dates, date) {
+				if err := p.preflightSource(ctx, pending.WorkspaceID, session.TaskID, session.ID, session.ACPSessionID); err != nil {
+					return err
+				}
+			}
+		}
 		runCtx, cancel := context.WithTimeout(ctx, reportTimeout)
 		dateEntries, dateErr := p.runDatedReport(runCtx, cmd, date, date)
 		cancel()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !p.collectionEnabled(ctx) {
+			return nil
+		}
 		if dateErr != nil {
 			return dateErr
 		}
@@ -210,47 +271,26 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 				continue
 			}
 			response := responseForEntries(session.ID, session.ACPSessionID, dateEntries, warn, high, p.now())
+			if !response.Found {
+				if err := p.checkTokscaleSnapshotCoverage(ctx, &response, usageCoverage{Date: date, Timezone: sourceTimezone()}); err != nil {
+					return err
+				}
+			}
 			if response.Found {
-				task, taskErr := host.Tasks().Get(ctx, session.TaskID)
-				if taskErr != nil {
-					return taskErr
+				updated, persistErr := p.persistCollectorUsage(ctx, pending, session, &response, usageCoverage{Date: date, Timezone: sourceTimezone()})
+				if persistErr != nil {
+					return persistErr
 				}
-				if task != nil {
-					if persistErr := p.persistSessionUsageWithCoverage(ctx, task.WorkspaceID, session.TaskID, session.ID, &response, usageCoverage{Date: date, Timezone: sourceTimezone()}); persistErr != nil {
-						return persistErr
-					}
-				}
-				if isActiveState(session.State) {
-					// Active snapshots are refreshed again when the current day is
-					// re-queued. Remove a successful day now so older pending days
-					// cannot starve the current day.
+				pending = updated
+				if isActiveState(session.State) && date == pending.ActiveDate {
 					pending.Dates = removeDate(pending.Dates, date)
-					if pending.DateAttempts != nil {
-						delete(pending.DateAttempts, date)
-					}
+					delete(pending.DateAttempts, date)
 				} else {
-					if pending.DateAttempts == nil {
-						pending.DateAttempts = make(map[string]int)
-					}
-					// A Found response can still describe the transcript before its
-					// final messages have flushed. Keep terminal dates for bounded
-					// stabilization passes so a later report can correct the bucket.
-					pending.DateAttempts[date]++
-					if pending.DateAttempts[date] >= maxFinalCollectionAttempts {
-						pending.Dates = removeDate(pending.Dates, date)
-						delete(pending.DateAttempts, date)
-					}
+					finishObservedDate(&pending, date)
 				}
 				pending.Attempts = 0
 			} else {
-				if pending.DateAttempts == nil {
-					pending.DateAttempts = make(map[string]int)
-				}
-				pending.DateAttempts[date]++
-				if pending.DateAttempts[date] >= maxFinalCollectionAttempts {
-					pending.Dates = removeDate(pending.Dates, date)
-					delete(pending.DateAttempts, date)
-				}
+				finishObservedDate(&pending, date)
 			}
 			checkpoint.Pending[session.ID] = pending
 		}
@@ -522,7 +562,7 @@ func responseForEntries(sessionID, acpID string, entries []sessionModelEntry, wa
 	response := sessionCostResponse{
 		GeneratedAt: now.UTC().Format(time.RFC3339), KandevSessionID: sessionID,
 		ACPSessionID: acpID, Models: []sessionModel{}, WarnThreshold: warn, HighThreshold: high,
-		Tokscale: InstallStatus{Installed: true}, Coverage: "missing", CostKnown: true, turnsKnown: true,
+		Tokscale: InstallStatus{Installed: true}, Coverage: "missing", CostKnown: true,
 	}
 	response.presence = make(map[string]usagePresence)
 	for _, entry := range entries {
@@ -530,6 +570,7 @@ func responseForEntries(sessionID, acpID string, entries []sessionModelEntry, wa
 			continue
 		}
 		response.Found = true
+		response.sourceEntries = append(response.sourceEntries, entry)
 		response.Cost += entry.Cost
 		response.Input += entry.Input
 		response.Output += entry.Output
@@ -542,8 +583,6 @@ func responseForEntries(sessionID, acpID string, entries []sessionModelEntry, wa
 			total = *presence.totalValue
 		}
 		response.Total += total
-		response.Turns += entry.MessageCount
-		response.turnsKnown = response.turnsKnown && presence.turns
 		response.CostKnown = response.CostKnown && presence.cost
 		response.presence[usagePresenceKey(entry.Model, entry.Provider)] = presence
 		response.Models = append(response.Models, sessionModel{
@@ -551,6 +590,7 @@ func responseForEntries(sessionID, acpID string, entries []sessionModelEntry, wa
 			CacheWrite: entry.CacheWrite, Reasoning: entry.Reasoning, Provider: entry.Provider, Cost: entry.Cost,
 		})
 	}
+	sourceDisplay(&response)
 	if response.Found {
 		response.Coverage = "complete"
 	}
@@ -558,4 +598,51 @@ func responseForEntries(sessionID, acpID string, entries []sessionModelEntry, wa
 		response.CostPerTurn = response.Cost / float64(response.Turns)
 	}
 	return response
+}
+
+func (p *plugin) persistCollectorUsage(ctx context.Context, pending collectorPending, session pluginsdk.Session, response *sessionCostResponse, coverage usageCoverage) (collectorPending, error) {
+	workspace := pending.WorkspaceID
+	if workspace == "" {
+		task, err := p.Host().Tasks().Get(ctx, session.TaskID)
+		if err != nil {
+			return pending, err
+		}
+		if task == nil {
+			return pending, errors.New("usage task unavailable before binding")
+		}
+		workspace = task.WorkspaceID
+	}
+	target, err := p.resolveUsageTarget(ctx, workspace, session.TaskID, session.ID, session.ACPSessionID, pending.SubjectBinding)
+	if err != nil {
+		return pending, err
+	}
+	pending.SubjectBinding, pending.WorkspaceID = target.SubjectBinding, workspace
+	return pending, p.persistTargetUsage(ctx, target, response, coverage)
+}
+
+// Keep only days actually observed active. This bounded queue is not history
+// discovery; current sampling and final work share the existing date rotation.
+func addObservedRollover(pending *collectorPending, date string) {
+	if date == "" || containsDate(pending.RolloverDates, date) {
+		return
+	}
+	pending.RolloverDates = append(pending.RolloverDates, date)
+	sort.Strings(pending.RolloverDates)
+	if len(pending.RolloverDates) > maxObservedRolloverDays {
+		old := pending.RolloverDates[0]
+		pending.RolloverDates = pending.RolloverDates[1:]
+		delete(pending.DateAttempts, old)
+	}
+}
+
+func finishObservedDate(pending *collectorPending, date string) {
+	if pending.DateAttempts == nil {
+		pending.DateAttempts = make(map[string]int)
+	}
+	pending.DateAttempts[date]++
+	if pending.DateAttempts[date] >= maxFinalCollectionAttempts {
+		pending.Dates = removeDate(pending.Dates, date)
+		pending.RolloverDates = removeDate(pending.RolloverDates, date)
+		delete(pending.DateAttempts, date)
+	}
 }

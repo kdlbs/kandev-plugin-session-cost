@@ -3,19 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"math"
-	"net/url"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -36,28 +35,41 @@ const (
 	defaultHighThreshold = 10.0 // USD — amount turns red at or above this
 )
 
-// plugin implements pluginsdk.Plugin (via UnimplementedPlugin). Its single
-// webhook is relayed by kandev from
-// GET /api/plugins/kandev-session-cost/webhooks/session-cost over gRPC; the
-// chat-toolbar UI is the only intended caller (host.api.fetch).
+// plugin implements pluginsdk.Plugin (via UnimplementedPlugin). The legacy
+// webhook only directs callers to the authenticated session usage action.
 type plugin struct {
 	pluginsdk.UnimplementedPlugin
 
 	// Seams injected for tests; production values set in newPlugin.
-	run              runner
-	lookPath         func(string) (string, error)
-	now              func() time.Time
-	reportMu         sync.Mutex
-	reports          *reportCoordinator
-	toolbar          *toolbarReportCoordinator
-	hostRead         time.Duration
-	collectorMu      sync.Mutex
-	collectorStarted bool
-	collectorCancel  context.CancelFunc
-	importMu         sync.Mutex
-	importRunning    bool
-	importWorkspace  string
-	importCancel     context.CancelFunc
+	run                runner
+	lookPath           func(string) (string, error)
+	now                func() time.Time
+	reportMu           sync.Mutex
+	reports            *reportCoordinator
+	toolbar            *toolbarReportCoordinator
+	hostRead           time.Duration
+	canonicalMu        sync.Mutex
+	canonicalSerial    uint64
+	canonicalReads     map[string]uint64
+	usageStateMu       sync.Mutex
+	usageStateReady    bool
+	usageCleanupMu     sync.Mutex
+	usageCleanupCancel context.CancelFunc
+	usageCleanupClosed bool
+	usageCleanupWait   func(context.Context) bool
+	usageMu            sync.Mutex
+	adapter            usageAdapter
+	importWait         func(context.Context) bool
+	collectorMu        sync.Mutex
+	collectorStarted   bool
+	collectorCancel    context.CancelFunc
+	importStateMu      sync.Mutex
+	importRevoked      map[string]bool
+	importMu           sync.Mutex
+	importGeneration   uint64
+	importRunning      bool
+	importWorkspace    string
+	importCancel       context.CancelFunc
 }
 
 func newPlugin() *plugin {
@@ -76,11 +88,20 @@ func newPlugin() *plugin {
 
 func (p *plugin) SetHost(host pluginsdk.Host) {
 	p.UnimplementedPlugin.SetHost(host)
+	ctx, cancel := p.canonicalReadContext(context.Background())
+	defer cancel()
+	if err := p.ensureUsageStatePrivacy(ctx); err != nil {
+		log.Printf("session-cost state cleanup: %v", err)
+		if retryUsageStateCleanup(err) {
+			p.startUsageStateCleanup()
+		}
+		return
+	}
 	p.startCollector()
 }
 
-// sessionCostResponse is the session-cost webhook payload the chat-toolbar UI
-// renders in its hover popover.
+// sessionCostResponse is the authenticated session-usage action payload the
+// chat-toolbar UI renders in its hover popover.
 type sessionCostResponse struct {
 	GeneratedAt string        `json:"generated_at"`
 	ReportState string        `json:"report_state,omitempty"`
@@ -100,19 +121,22 @@ type sessionCostResponse struct {
 	CacheWrite int64   `json:"cache_write"`
 	Reasoning  int64   `json:"reasoning"`
 	Total      int64   `json:"total"`
-	// Turns is the number of messages tokscale parsed for this session's
-	// transcript — the session's turn count, computed server-side.
+	// Turns is populated only by canonical Kandev turn evidence. Tokscale
+	// message counts do not establish Kandev turns.
 	Turns int64 `json:"turns"`
 	// CostPerTurn is the average spend per turn (Cost / Turns), 0 when there
 	// are no turns yet. Precomputed here so the UI stays a dumb renderer.
-	CostPerTurn float64        `json:"cost_per_turn"`
-	CostKnown   bool           `json:"cost_known"`
-	Models      []sessionModel `json:"models"`
-	Saved       bool           `json:"saved"`
-	Stale       bool           `json:"stale"`
-	Coverage    string         `json:"coverage"`
-	LastRefresh string         `json:"last_refresh,omitempty"`
-	Error       string         `json:"error,omitempty"`
+	CostPerTurn  float64        `json:"cost_per_turn"`
+	CostKnown    bool           `json:"cost_known"`
+	TokenAmounts tokenDisplay   `json:"token_amounts,omitempty"`
+	Currency     string         `json:"currency,omitempty"`
+	CostBasis    string         `json:"cost_basis,omitempty"`
+	Models       []sessionModel `json:"models"`
+	Saved        bool           `json:"saved"`
+	Stale        bool           `json:"stale"`
+	Coverage     string         `json:"coverage"`
+	LastRefresh  string         `json:"last_refresh,omitempty"`
+	Error        string         `json:"error,omitempty"`
 	// WarnThreshold / HighThreshold are the operator-configured USD cutoffs the
 	// UI uses to colour the amount (green < warn <= amber < high <= red).
 	WarnThreshold float64 `json:"warn_threshold"`
@@ -122,48 +146,42 @@ type sessionCostResponse struct {
 	// presence bits needed when a cumulative tokscale row is saved. A JSON
 	// number of zero is a measured zero; an omitted tokscale field must remain
 	// nil in the core measurement.
-	presence   map[string]usagePresence
-	turnsKnown bool
+	presence                    map[string]usagePresence
+	sourceEntries               []sessionModelEntry
+	Compatibility               string `json:"compatibility,omitempty"`
+	CanonicalPending            bool   `json:"canonical_pending,omitempty"`
+	ProjectionStatus            string `json:"projection_status,omitempty"`
+	ProjectionGeneration        string `json:"projection_generation,omitempty"`
+	ProjectionPending           bool   `json:"projection_pending,omitempty"`
+	PendingProjectionGeneration string `json:"pending_projection_generation,omitempty"`
 }
 
 type sessionModel struct {
-	Model      string  `json:"model"`
-	Input      int64   `json:"input"`
-	Output     int64   `json:"output"`
-	CacheRead  int64   `json:"cache_read"`
-	CacheWrite int64   `json:"cache_write"`
-	Reasoning  int64   `json:"reasoning"`
-	Provider   string  `json:"provider,omitempty"`
-	Cost       float64 `json:"cost"`
+	TokenAmounts tokenDisplay `json:"token_amounts,omitempty"`
+	CostKnown    *bool        `json:"cost_known,omitempty"`
+	Currency     string       `json:"currency,omitempty"`
+	CostBasis    string       `json:"cost_basis,omitempty"`
+	ExactCost    *string      `json:"cost_subcents_exact,omitempty"`
+	Model        string       `json:"model"`
+	Input        int64        `json:"input"`
+	Output       int64        `json:"output"`
+	CacheRead    int64        `json:"cache_read"`
+	CacheWrite   int64        `json:"cache_write"`
+	Reasoning    int64        `json:"reasoning"`
+	Provider     string       `json:"provider,omitempty"`
+	Cost         float64      `json:"cost"`
 }
 
-func (p *plugin) HandleWebhook(ctx context.Context, req *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error) {
-	if req.WebhookKey != webhookKeySessionCost {
+func (_ *plugin) HandleWebhook(_ context.Context, req *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error) {
+	if req == nil || req.WebhookKey != webhookKeySessionCost {
 		return jsonResponse(404, []byte(`{"error":"unknown webhook"}`)), nil
 	}
-	query, err := url.ParseQuery(req.Query)
-	if err != nil {
-		return jsonResponse(400, []byte(`{"error":"invalid query"}`)), nil
-	}
-	taskID := query.Get("task_id")
-	activeSessionID := query.Get("active")
-
-	response, err := p.responsiveSessionUsage(ctx, "", taskID, activeSessionID, query.Get("refresh") == "1")
-	body, encodeErr := json.Marshal(response)
-	if err == nil {
-		err = encodeErr
-	}
-	if err != nil {
-		log.Printf("session-cost failed: %v", err)
-		msg, _ := json.Marshal(map[string]string{"error": err.Error()})
-		return jsonResponse(503, msg), nil
-	}
-	return jsonResponse(200, body), nil
+	return jsonResponse(200, []byte(`{"compatibility":"upgrade_required","error":"Use the authenticated session-usage action to view or refresh usage."}`)), nil
 }
 
 // HandleAction serves the authenticated saved/refresh flow used by the
-// toolbar. The action context is host-verified, so the plugin receives only
-// an authorized task/session/workspace tuple.
+// toolbar. The action context is host-verified, then the current usage binding
+// is reauthorized in that workspace before any installation-scoped read.
 func (p *plugin) HandleAction(ctx context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
 	if req == nil {
 		return &pluginsdk.PluginActionResponse{Status: 404, Headers: jsonHeaders(), Body: []byte(`{"error":"unknown action"}`)}, nil
@@ -184,8 +202,30 @@ func (p *plugin) HandleAction(ctx context.Context, req *pluginsdk.PluginActionRe
 			return &pluginsdk.PluginActionResponse{Status: 400, Headers: jsonHeaders(), Body: []byte(`{"error":"invalid request"}`)}, nil
 		}
 	}
+	if err := p.authorizeSessionUsageActionScope(ctx, req.Context.WorkspaceID, req.Context.TaskID, req.Context.SessionID); err != nil {
+		if errors.Is(err, errUsageHistoryUnsupported) {
+			response := p.unavailableSource(nil, req.Context.SessionID, defaultWarnThreshold, defaultHighThreshold, errUsageHistoryUnsupported)
+			encoded, encodeErr := json.Marshal(response)
+			if encodeErr != nil {
+				return nil, encodeErr
+			}
+			return &pluginsdk.PluginActionResponse{Status: 200, Headers: jsonHeaders(), Body: encoded}, nil
+		}
+		switch status.Code(err) {
+		case codes.PermissionDenied, codes.FailedPrecondition:
+			return &pluginsdk.PluginActionResponse{Status: 403, Headers: jsonHeaders(), Body: []byte(`{"error":"saved usage is no longer accessible"}`)}, nil
+		case codes.NotFound:
+			return &pluginsdk.PluginActionResponse{Status: 404, Headers: jsonHeaders(), Body: []byte(`{"error":"saved usage is no longer accessible"}`)}, nil
+		case codes.Unauthenticated:
+			return &pluginsdk.PluginActionResponse{Status: 401, Headers: jsonHeaders(), Body: []byte(`{"error":"saved usage is no longer accessible"}`)}, nil
+		}
+		return nil, err
+	}
 	response, err := p.responsiveSessionUsage(ctx, req.Context.WorkspaceID, req.Context.TaskID, req.Context.SessionID, body.Refresh)
 	if err != nil {
+		if accessStatus := canonicalAccessStatus(err); accessStatus != 0 {
+			return &pluginsdk.PluginActionResponse{Status: accessStatus, Headers: jsonHeaders(), Body: []byte(`{"error":"saved usage is no longer accessible"}`)}, nil
+		}
 		return nil, err
 	}
 	encoded, err := json.Marshal(response)
@@ -208,6 +248,10 @@ func (p *plugin) sessionCost(ctx context.Context, taskID, activeSessionID string
 }
 
 func (p *plugin) calculateSessionCost(ctx context.Context, taskID, activeSessionID string) (*sessionCostResponse, error) {
+	return p.calculateSessionCostInScope(ctx, "", taskID, activeSessionID)
+}
+
+func (p *plugin) calculateSessionCostInScope(ctx context.Context, workspaceID, taskID, activeSessionID string) (*sessionCostResponse, error) {
 	warn, high := p.configuredThresholds(ctx)
 	cmd := resolveCommand(p.configuredCommand(ctx), p.lookPath)
 
@@ -219,11 +263,17 @@ func (p *plugin) calculateSessionCost(ctx context.Context, taskID, activeSession
 		HighThreshold:   high,
 		Coverage:        "missing",
 		CostKnown:       true,
-		turnsKnown:      true,
 	}
 
 	// Server-side session -> ACP transcript id mapping via the Host data API.
 	resp.ACPSessionID = p.resolveACPSessionID(ctx, taskID, activeSessionID)
+	if resp.ACPSessionID != "" {
+		if err := p.preflightSource(ctx, workspaceID, taskID, activeSessionID, resp.ACPSessionID); err != nil {
+			return p.unavailableSource(nil, activeSessionID, warn, high, err), nil
+		}
+	} else {
+		return &resp, nil
+	}
 
 	runCtx, cancel := context.WithTimeout(ctx, reportTimeout)
 	defer cancel()
@@ -238,6 +288,9 @@ func (p *plugin) calculateSessionCost(ctx context.Context, taskID, activeSession
 		return &resp, nil
 	}
 	resp.Tokscale = InstallStatus{Command: commandDisplay(cmd), Source: cmd.Source, Installed: true}
+	if err := p.preflightSource(ctx, workspaceID, taskID, activeSessionID, resp.ACPSessionID); err != nil {
+		return p.unavailableSource(nil, activeSessionID, warn, high, err), nil
+	}
 
 	if resp.ACPSessionID == "" {
 		return &resp, nil // agent hasn't reported a transcript id yet
@@ -247,6 +300,7 @@ func (p *plugin) calculateSessionCost(ctx context.Context, taskID, activeSession
 			continue
 		}
 		resp.Found = true
+		resp.sourceEntries = append(resp.sourceEntries, e)
 		resp.Cost += e.Cost
 		resp.Input += e.Input
 		resp.Output += e.Output
@@ -259,8 +313,6 @@ func (p *plugin) calculateSessionCost(ctx context.Context, taskID, activeSession
 			total = *presence.totalValue
 		}
 		resp.Total += total
-		resp.Turns += e.MessageCount
-		resp.turnsKnown = resp.turnsKnown && presence.turns
 		resp.CostKnown = resp.CostKnown && presence.cost
 		if resp.presence == nil {
 			resp.presence = make(map[string]usagePresence)
@@ -276,6 +328,10 @@ func (p *plugin) calculateSessionCost(ctx context.Context, taskID, activeSession
 			Provider:   e.Provider,
 			Cost:       e.Cost,
 		})
+	}
+	sourceDisplay(&resp)
+	if err := p.checkTokscaleSnapshot(ctx, &resp); err != nil {
+		return p.unavailableSource(nil, activeSessionID, warn, high, err), nil
 	}
 	if resp.Found {
 		resp.Coverage = "complete"
@@ -311,139 +367,131 @@ func (p *plugin) runDatedReport(ctx context.Context, cmd resolvedCommand, since,
 
 func (p *plugin) sessionUsage(ctx context.Context, workspaceID, taskID, sessionID string, refresh bool) (*sessionCostResponse, error) {
 	warn, high := p.configuredThresholds(ctx)
-	var saved *sessionCostResponse
-	var hasSaved bool
-	if workspaceID != "" && taskID != "" && sessionID != "" {
-		saved, hasSaved = p.savedSessionUsage(ctx, workspaceID, taskID, sessionID, warn, high)
+	saved, hasSaved, readErr := p.loadSavedSessionUsage(ctx, workspaceID, taskID, sessionID, warn, high)
+	if readErr != nil {
+		return nil, readErr
 	}
-	if !refresh {
-		if hasSaved {
-			return saved, nil
-		}
+	if hasSaved && savedUsageReadOnly(saved) {
+		return saved, nil
 	}
-	response, err := p.calculateSessionCost(ctx, taskID, sessionID)
+	if hasSaved && saved.Found && !p.collectionEnabled(ctx) {
+		return saved, nil
+	}
+	if hasSaved && (saved.Found || saved.CanonicalPending) && !refresh {
+		return saved, nil
+	}
+	response, err := p.calculateSessionCostInScope(ctx, workspaceID, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	if response.Compatibility == "source_context_unavailable" {
+		return p.unavailableSource(saved, sessionID, warn, high), nil
+	}
+	if response.Compatibility == "source_context_preparing" {
+		return p.unavailableSource(saved, sessionID, warn, high, errUsageTargetsPreparing), nil
+	}
+	if response.Compatibility == "upgrade_required" {
+		return p.unavailableSource(saved, sessionID, warn, high, errUsageHistoryUnsupported), nil
+	}
+	if response.Compatibility == "source_membership_ambiguous" {
+		return p.unavailableSource(saved, sessionID, warn, high, errTokscaleMembership), nil
+	}
 	if response.Found && p.collectionEnabled(ctx) {
-		if err := p.persistSessionUsage(ctx, workspaceID, taskID, sessionID, response); err != nil {
-			log.Printf("persisting session usage: %v", err)
-			response.Stale = true
-			response.Error = "usage was calculated but could not be accepted"
-			var rejected *usageWriteRejectedError
-			if errors.As(err, &rejected) && rejected.complete && len(rejected.measurements) > 0 {
-				canonical := responseFromSaved(rejected.measurements, sessionID, warn, high)
-				canonical.ACPSessionID = response.ACPSessionID
-				canonical.Stale = true
-				canonical.Error = response.Error
-				return &canonical, nil
-			}
-			// A write can lose a revision race after the initial saved read. Do
-			// not return the rejected calculation as if it were current. Read
-			// the host's canonical value, which may be a newer plugin/native
-			// observation, and attach the refresh error to that value.
-			if canonical, ok := p.savedSessionUsage(ctx, workspaceID, taskID, sessionID, warn, high); ok {
-				canonical.Stale = true
-				canonical.Error = response.Error
-				return canonical, nil
-			}
-			// If the authoritative read is unavailable, clear the rejected
-			// numbers before returning the status so the UI cannot mistake
-			// them for accepted saved usage.
-			response.Found = false
-			response.Cost = 0
-			response.Input = 0
-			response.Output = 0
-			response.CacheRead = 0
-			response.CacheWrite = 0
-			response.Reasoning = 0
-			response.Total = 0
-			response.Turns = 0
-			response.CostPerTurn = 0
-			response.Models = []sessionModel{}
-		} else if canonical, ok := p.savedSessionUsage(ctx, workspaceID, taskID, sessionID, warn, high); ok {
-			return canonical, nil
-		}
+		writeErr := p.persistSessionUsage(ctx, workspaceID, taskID, sessionID, response)
+		return p.canonicalUsageAfterWrite(ctx, workspaceID, taskID, sessionID, response, saved, writeErr), nil
 	}
 	if hasSaved && !response.Found {
 		saved.Stale = true
 		saved.Error = response.Error
-		if saved.Error == "" && !response.Tokscale.Installed {
-			saved.Error = "refresh unavailable"
-		}
 		return saved, nil
 	}
 	return response, nil
 }
 
-func (p *plugin) savedSessionUsage(ctx context.Context, workspaceID, taskID, sessionID string, warn, high float64) (*sessionCostResponse, bool) {
-	host := p.Host()
-	if host == nil || workspaceID == "" || sessionID == "" {
-		return nil, false
-	}
-	var items []pluginsdk.SessionUsageMeasurement
-	page := pluginsdk.Page{Limit: 200}
-	for {
-		pageItems, info, err := host.Usage().ListCanonical(ctx, pluginsdk.SessionUsageFilter{
-			WorkspaceID: workspaceID, TaskIDs: []string{taskID}, SessionIDs: []string{sessionID},
-		}, page)
-		if err != nil {
-			return nil, false
+// Admission receipts describe source rows. Only a canonical read may supply
+// displayed saved amounts, including when the projection is still pending.
+func (p *plugin) canonicalUsageAfterWrite(ctx context.Context, workspaceID, taskID, sessionID string, calculated, _ *sessionCostResponse, writeErr error) *sessionCostResponse {
+	canonical, found, readErr := p.loadSavedSessionUsage(ctx, workspaceID, taskID, sessionID, calculated.WarnThreshold, calculated.HighThreshold)
+	if readErr != nil {
+		unavailable := p.canonicalReadFailure(sessionID, calculated.WarnThreshold, calculated.HighThreshold)
+		if canonicalAccessStatus(readErr) != 0 {
+			unavailable.ReportError = reportErrorAccessDenied
 		}
-		items = append(items, pageItems...)
-		if info == nil || !info.HasMore || info.NextCursor == "" {
-			break
+		unavailable.Error = "saved usage is no longer accessible"
+		return unavailable
+	}
+	if canonical == nil {
+		empty := responseForEntries(sessionID, calculated.ACPSessionID, nil, calculated.WarnThreshold, calculated.HighThreshold, p.now())
+		empty.CostKnown = false
+		canonical = &empty
+	}
+	if canonical.Compatibility == "upgrade_required" || canonical.ReportError == reportErrorInvalidQuery {
+		return canonical
+	}
+	canonical.Stale = canonical.Stale || writeErr != nil || !found
+	if writeErr != nil {
+		canonical.ReportState = reportStateFailed
+		canonical.ReportError = reportErrorFailed
+		canonical.Error = "usage was calculated but could not be accepted"
+		if errors.Is(writeErr, errTokscaleMembership) {
+			canonical.Compatibility = "source_membership_ambiguous"
+			canonical.ReportError = "source_membership"
+			canonical.Error = errTokscaleMembership.Error()
 		}
-		page.Cursor = info.NextCursor
+		if errors.Is(writeErr, errUsageHistoryUnsupported) {
+			canonical.Compatibility = "upgrade_required"
+			canonical.ReportError = reportErrorUnavailable
+			canonical.Error = errUsageHistoryUnsupported.Error()
+		}
+	} else if !found {
+		canonical.CanonicalPending = true
+		canonical.ProjectionPending = true
+		canonical.ReportState = reportStatePending
 	}
-	if len(items) == 0 {
-		return nil, false
-	}
-	response := responseFromSaved(items, sessionID, warn, high)
-	if response.ACPSessionID == "" {
-		response.ACPSessionID = p.resolveACPSessionID(ctx, taskID, sessionID)
-	}
-	return &response, true
+	return canonical
 }
 
 func responseFromSaved(items []pluginsdk.SessionUsageMeasurement, sessionID string, warn, high float64) sessionCostResponse {
 	response := sessionCostResponse{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339), KandevSessionID: sessionID,
 		Models: []sessionModel{}, WarnThreshold: warn, HighThreshold: high, Saved: true,
-		Coverage: "complete", CostKnown: true, Tokscale: InstallStatus{Installed: true},
+		Coverage: "complete", Tokscale: InstallStatus{Installed: true},
 	}
+	type modelKey struct{ model, provider string }
+	var modelOrder []modelKey
+	modelRows := make(map[modelKey][]pluginsdk.SessionUsageMeasurement)
 	for _, item := range items {
 		if response.ACPSessionID == "" {
 			response.ACPSessionID = item.TranscriptID
 		}
 		response.Found = true
-		costAvailable := item.CostSubcents != nil &&
-			(item.CostCoverage == "" || item.CostCoverage == "complete") &&
-			item.CostBasis != "unknown" && item.CostBasis != "mixed" &&
-			item.Currency != "mixed"
-		response.CostKnown = response.CostKnown && costAvailable
-		response.Input += valueOrZero(item.InputTokens)
-		response.Output += valueOrZero(item.OutputTokens)
-		response.CacheRead += valueOrZero(item.CacheReadTokens)
-		response.CacheWrite += valueOrZero(item.CacheWriteTokens)
-		response.Reasoning += valueOrZero(item.ReasoningTokens)
-		response.Total += valueOrZero(item.TotalTokens)
-		response.Turns += valueOrZero(item.Turns)
-		if costAvailable {
-			response.Cost += float64(*item.CostSubcents) / 10000
-		}
 		if item.Coverage != "complete" {
 			response.Coverage = "partial"
 		}
 		response.Stale = response.Stale || item.Stale
-		response.Models = append(response.Models, sessionModel{
-			Model: item.Model, Input: valueOrZero(item.InputTokens), Output: valueOrZero(item.OutputTokens),
-			CacheRead: valueOrZero(item.CacheReadTokens), CacheWrite: valueOrZero(item.CacheWriteTokens),
-			Reasoning: valueOrZero(item.ReasoningTokens), Provider: item.Provider, Cost: costFromSubcents(item.CostSubcents),
-		})
+		key := modelKey{item.Model, item.Provider}
+		if _, exists := modelRows[key]; !exists {
+			modelOrder = append(modelOrder, key)
+		}
+		modelRows[key] = append(modelRows[key], item)
 		if item.CollectedAt != "" && item.CollectedAt > response.LastRefresh {
 			response.LastRefresh = item.CollectedAt
 		}
+	}
+	amounts := savedMetricAmounts(items)
+	response.applyTokenDisplay(amounts.tokens)
+	response.Cost, response.CostKnown = amounts.cost, amounts.costKnown
+	response.Currency, response.CostBasis = amounts.currency, amounts.basis
+	for _, key := range modelOrder {
+		amounts := savedMetricAmounts(modelRows[key])
+		known := amounts.costKnown
+		response.Models = append(response.Models, sessionModel{
+			TokenAmounts: amounts.tokens, CostKnown: &known, Currency: amounts.currency, CostBasis: amounts.basis, ExactCost: amounts.exactCost,
+			Model: key.model, Provider: key.provider, Cost: amounts.cost,
+			Input: displayInt64(amounts.tokens["input"]), Output: displayInt64(amounts.tokens["output"]),
+			CacheRead: displayInt64(amounts.tokens["cache_read"]), CacheWrite: displayInt64(amounts.tokens["cache_write"]),
+			Reasoning: displayInt64(amounts.tokens["reasoning"]),
+		})
 	}
 	if response.CostKnown && response.Turns > 0 {
 		response.CostPerTurn = response.Cost / float64(response.Turns)
@@ -456,13 +504,6 @@ func valueOrZero(value *int64) int64 {
 		return 0
 	}
 	return *value
-}
-
-func costFromSubcents(value *int64) float64 {
-	if value == nil {
-		return 0
-	}
-	return float64(*value) / 10000
 }
 
 type usageCoverage struct {
@@ -478,176 +519,26 @@ func (p *plugin) persistSessionUsageWithCoverage(ctx context.Context, workspaceI
 	if coverage.Date != "" && coverage.Timezone == "" {
 		return errors.New("cannot resolve source timezone; set TZ to an IANA timezone before dated collection")
 	}
-	host := p.Host()
-	if host == nil || workspaceID == "" || taskID == "" || sessionID == "" || response.ACPSessionID == "" {
+	if !p.collectionEnabled(ctx) {
 		return nil
 	}
-	now := p.now().UTC()
-	existing, err := p.savedUsageMeasurements(ctx, workspaceID, taskID, sessionID)
+	if p.Host() == nil || workspaceID == "" || taskID == "" || sessionID == "" || response.ACPSessionID == "" {
+		return errors.New("usage collection requires workspace, task, session and transcript context")
+	}
+	target, err := p.resolveUsageTarget(ctx, workspaceID, taskID, sessionID, response.ACPSessionID)
 	if err != nil {
 		return err
 	}
-	existingDigests := make(map[string]string, len(existing))
-	for _, item := range existing {
-		existingDigests[usageMeasurementKey(item.Model, item.Provider, item.UsageIdentity, item.CoverageKey)] = item.PayloadDigest
-	}
-	usageIdentity, coverageKey, sourceDate, sourceTimezone := usageIdentityForCoverage(response.ACPSessionID, coverage)
-	unchanged := true
-	for i, model := range response.Models {
-		key := usageMeasurementKey(model.Model, model.Provider, usageIdentity, coverageKey)
-		presence := responsePresenceForModel(response, model)
-		turns := (*int64)(nil)
-		if i == 0 && response.turnsKnown {
-			turns = ptr(response.Turns)
-		}
-		total := model.Input + model.Output + model.CacheRead + model.CacheWrite + model.Reasoning
-		if presence.totalValue != nil {
-			total = *presence.totalValue
-		}
-		if existingDigests[key] != usagePayloadDigest(response.ACPSessionID, model, presence, turns, ptrIf(presence.total, total)) {
-			unchanged = false
-			break
-		}
-	}
-	if unchanged {
-		return nil
-	}
-	revision := now.UnixNano()
-	items := make([]pluginsdk.SessionUsageMeasurement, 0, len(response.Models))
-	for i, model := range response.Models {
-		presence := responsePresenceForModel(response, model)
-		var turns *int64
-		if i == 0 && response.turnsKnown {
-			turns = ptr(response.Turns)
-		}
-		total := model.Input + model.Output + model.CacheRead + model.CacheWrite + model.Reasoning
-		if presence.totalValue != nil {
-			total = *presence.totalValue
-		}
-		cost := ptrIf(presence.cost, int64(math.Round(model.Cost*10000)))
-		costBasis := "unknown"
-		if presence.cost {
-			costBasis = "estimated"
-		}
-		digest := usagePayloadDigest(response.ACPSessionID, model, presence, turns, ptrIf(presence.total, total))
-		items = append(items, pluginsdk.SessionUsageMeasurement{
-			WorkspaceID: workspaceID, TaskID: taskID, SessionID: sessionID, TranscriptID: response.ACPSessionID,
-			SourceRecordID: response.ACPSessionID, UsageIdentity: usageIdentity,
-			Model: model.Model, Provider: model.Provider, SourceVersion: "tokscale-4.15.1",
-			Revision: revision, PayloadDigest: digest,
-			ObservedAt: now.Format(time.RFC3339Nano), CollectedAt: now.Format(time.RFC3339Nano),
-			InputTokens: ptrIf(presence.input, model.Input), OutputTokens: ptrIf(presence.output, model.Output),
-			CacheReadTokens: ptrIf(presence.cacheRead, model.CacheRead), CacheWriteTokens: ptrIf(presence.cacheWrite, model.CacheWrite),
-			ReasoningTokens: ptrIf(presence.reasoning, model.Reasoning), Turns: turns,
-			TotalTokens: ptrIf(presence.total, total), CostSubcents: cost, Currency: "USD",
-			CostBasis: costBasis, CostCoverage: costCoverageForPresence(presence), Coverage: "complete",
-			SourceTimezone: sourceTimezone, SourceDate: sourceDate, CoverageKey: coverageKey,
-			AttributionStatus: "attributed",
-			Estimated:         presence.cost,
-		})
-	}
-	results, err := host.Usage().UpsertBatch(ctx, workspaceID, items)
-	if err != nil {
-		return err
-	}
-	if len(results) != len(items) {
-		return fmt.Errorf("usage write returned %d results for %d measurements", len(results), len(items))
-	}
-	accepted := make([]pluginsdk.SessionUsageMeasurement, 0, len(results))
-	allHaveMeasurements := true
-	rejectedStatus := ""
-	for _, result := range results {
-		if result.Measurement != nil {
-			accepted = append(accepted, *result.Measurement)
-		} else {
-			allHaveMeasurements = false
-		}
-		switch result.Status {
-		case "applied", "unchanged":
-			continue
-		case "stale", "conflict":
-			rejectedStatus = result.Status
-		default:
-			if result.Error != "" {
-				return errors.New(result.Error)
-			}
-			return fmt.Errorf("usage write for %s returned status %q", result.Model, result.Status)
-		}
-	}
-	if rejectedStatus != "" {
-		return &usageWriteRejectedError{status: rejectedStatus, measurements: accepted, complete: allHaveMeasurements}
-	}
-	return nil
+	return p.persistTargetUsage(ctx, target, response, coverage)
 }
 
-// usageWriteRejectedError carries the rows the Host accepted as the current
-// values when a batch loses a revision race. Callers that are presenting a
-// refresh can render these rows immediately; background collection can simply
-// retry the observation on its next pass.
 type usageWriteRejectedError struct {
-	status       string
-	measurements []pluginsdk.SessionUsageMeasurement
-	complete     bool
+	status  string
+	results []pluginsdk.UsageObservationWriteResultV1
 }
 
 func (e *usageWriteRejectedError) Error() string {
 	return fmt.Sprintf("usage write %s was rejected", e.status)
-}
-
-func usageMeasurementKey(model, provider, identity, coverageKey string) string {
-	return strings.Join([]string{model, provider, identity, coverageKey}, "\x00")
-}
-
-func usageIdentityForCoverage(transcriptID string, coverage usageCoverage) (identity, coverageKey, sourceDate, sourceTimezone string) {
-	if coverage.Date == "" {
-		return "lifetime:" + transcriptID, "", "", ""
-	}
-	return "date:" + transcriptID + ":" + coverage.Date, coverage.Date, coverage.Date, coverage.Timezone
-}
-
-func costCoverageForPresence(presence usagePresence) string {
-	if presence.cost {
-		return "complete"
-	}
-	return "missing"
-}
-
-func (p *plugin) savedUsageMeasurements(ctx context.Context, workspaceID, taskID, sessionID string) ([]pluginsdk.SessionUsageMeasurement, error) {
-	host := p.Host()
-	if host == nil {
-		return nil, nil
-	}
-	// The Host source-observation projection chooses either the lifetime rows or
-	// the dated buckets for an all-time query. Read both projections so a dated
-	// write can compare its digest with an existing bucket even when a lifetime
-	// snapshot is also present. The stable key below removes the overlap when a
-	// source has only one representation.
-	filters := []pluginsdk.SessionUsageFilter{
-		{WorkspaceID: workspaceID, TaskIDs: []string{taskID}, SessionIDs: []string{sessionID}},
-		{WorkspaceID: workspaceID, TaskIDs: []string{taskID}, SessionIDs: []string{sessionID}, GroupBy: "day"},
-	}
-	byKey := make(map[string]pluginsdk.SessionUsageMeasurement)
-	for _, filter := range filters {
-		page := pluginsdk.Page{Limit: 200}
-		for {
-			items, info, err := host.Usage().List(ctx, filter, page)
-			if err != nil {
-				return nil, err
-			}
-			for _, item := range items {
-				byKey[usageMeasurementKey(item.Model, item.Provider, item.UsageIdentity, item.CoverageKey)] = item
-			}
-			if info == nil || !info.HasMore || info.NextCursor == "" {
-				break
-			}
-			page.Cursor = info.NextCursor
-		}
-	}
-	all := make([]pluginsdk.SessionUsageMeasurement, 0, len(byKey))
-	for _, item := range byKey {
-		all = append(all, item)
-	}
-	return all, nil
 }
 
 func ptr(value int64) *int64 { return &value }
@@ -667,25 +558,8 @@ func responsePresenceForModel(response *sessionCostResponse, model sessionModel)
 	}
 	return usagePresence{
 		input: true, output: true, cacheRead: true, cacheWrite: true,
-		reasoning: true, turns: true, total: true, cost: true,
+		reasoning: true, total: true, cost: true,
 	}
-}
-
-func usagePayloadDigest(transcriptID string, model sessionModel, presence usagePresence, turns, total *int64) string {
-	payload := fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d\x00%d\x00%d\x00%d\x00%.8f\x00%t%t%t%t%t%t\x00%s\x00%s",
-		transcriptID, model.Model, model.Provider, model.Input, model.Output,
-		model.CacheRead, model.CacheWrite, model.Reasoning, model.Cost,
-		presence.input, presence.output, presence.cacheRead, presence.cacheWrite,
-		presence.reasoning, presence.cost, int64String(turns), int64String(total))
-	digest := sha256.Sum256([]byte(payload))
-	return fmt.Sprintf("%x", digest[:])
-}
-
-func int64String(value *int64) string {
-	if value == nil {
-		return "unknown"
-	}
-	return fmt.Sprintf("%d", *value)
 }
 
 // resolveACPSessionID looks up the active kandev session's ACP transcript id
@@ -789,17 +663,25 @@ func jsonResponse(status int32, body []byte) *pluginsdk.WebhookResponse {
 // sessionModelEntry mirrors one element of `tokscale models --json --group-by
 // session,model` output (tokscale 4.15.x). Only the fields used are declared.
 type sessionModelEntry struct {
-	SessionID    string  `json:"sessionId"`
-	Model        string  `json:"model"`
-	Input        int64   `json:"input"`
-	Output       int64   `json:"output"`
-	CacheRead    int64   `json:"cacheRead"`
-	CacheWrite   int64   `json:"cacheWrite"`
-	Reasoning    int64   `json:"reasoning"`
-	MessageCount int64   `json:"messageCount"`
-	Provider     string  `json:"provider,omitempty"`
-	SourceDate   string  `json:"date,omitempty"`
-	Cost         float64 `json:"cost"`
+	SessionID          string `json:"sessionId"`
+	Model              string `json:"model"`
+	Input              int64  `json:"input"`
+	Output             int64  `json:"output"`
+	CacheRead          int64  `json:"cacheRead"`
+	CacheWrite         int64  `json:"cacheWrite"`
+	Reasoning          int64  `json:"reasoning"`
+	MessageCount       int64  `json:"messageCount"`
+	Provider           string `json:"provider,omitempty"`
+	Client             string `json:"client,omitempty"`
+	SourceDate         string `json:"date,omitempty"`
+	Source             string `json:"source,omitempty"`
+	ModelProvider      string `json:"modelProvider,omitempty"`
+	AgentClient        string `json:"agentClient,omitempty"`
+	ServingPlatform    string `json:"servingPlatform,omitempty"`
+	SourceRecordID     string `json:"sourceRecordId,omitempty"`
+	SupersedesRecordID string `json:"supersedesRecordId,omitempty"`
+	costValue          *int64
+	Cost               float64 `json:"cost"`
 
 	presenceRecorded    bool
 	inputPresent        bool
@@ -836,6 +718,18 @@ func (e *sessionModelEntry) UnmarshalJSON(data []byte) error {
 	e.reasoningPresent = hasJSONValue(fields, "reasoning")
 	e.messageCountPresent = hasJSONValue(fields, "messageCount")
 	e.costPresent = hasJSONValue(fields, "cost")
+	if e.costPresent {
+		var err error
+		e.costValue, err = parseUSDAmount(string(fields["cost"]))
+		if err != nil {
+			return fmt.Errorf("parsing tokscale cost: %w", err)
+		}
+	}
+	for _, v := range []int64{e.Input, e.Output, e.CacheRead, e.CacheWrite, e.Reasoning, e.MessageCount} {
+		if v < 0 {
+			return errors.New("negative tokscale token or message count")
+		}
+	}
 	if raw, ok := firstJSONValue(fields, "total", "totalTokens"); ok {
 		var total int64
 		if err := json.Unmarshal(raw, &total); err != nil {
@@ -862,9 +756,9 @@ func firstJSONValue(fields map[string]json.RawMessage, keys ...string) (json.Raw
 }
 
 type usagePresence struct {
-	input, output, cacheRead, cacheWrite, reasoning, turns, cost bool
-	total                                                        bool
-	totalValue                                                   *int64
+	input, output, cacheRead, cacheWrite, reasoning, cost bool
+	total                                                 bool
+	totalValue                                            *int64
 }
 
 func usagePresenceKey(model, provider string) string {
@@ -875,15 +769,14 @@ func presenceForEntry(entry sessionModelEntry) usagePresence {
 	if !entry.presenceRecorded {
 		return usagePresence{
 			input: true, output: true, cacheRead: true, cacheWrite: true,
-			reasoning: true, turns: true, total: true, cost: true,
+			reasoning: true, total: true, cost: true,
 		}
 	}
-	totalKnown := entry.totalPresent || (entry.inputPresent && entry.outputPresent &&
-		entry.cacheReadPresent && entry.cacheWritePresent && entry.reasoningPresent)
+	totalKnown := entry.totalPresent
 	return usagePresence{
 		input: entry.inputPresent, output: entry.outputPresent, cacheRead: entry.cacheReadPresent,
 		cacheWrite: entry.cacheWritePresent, reasoning: entry.reasoningPresent,
-		turns: entry.messageCountPresent, cost: entry.costPresent,
+		cost:  entry.costPresent,
 		total: totalKnown, totalValue: entry.totalValue,
 	}
 }
@@ -913,5 +806,6 @@ func runSessionModels(ctx context.Context, cmd resolvedCommand, run runner, extr
 			return nil, fmt.Errorf("parsing tokscale entry: missing identity")
 		}
 	}
+	markPinnedTokscaleTotals(report.Entries, cmd)
 	return report.Entries, nil
 }

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,13 +48,15 @@ func TestRejectedBatchIncludesEveryAcceptedModel(t *testing.T) {
 		{SourceRecordID: "transcript", UsageIdentity: "lifetime:transcript", Model: "b", CostSubcents: ptr(int64(200))},
 	}}
 	p := newPlugin()
-	p.SetHost(&usageRecordingHost{fakeHost: &fakeHost{}, usage: usage})
-	response := sessionCostResponse{ACPSessionID: "transcript", Models: []sessionModel{{Model: "a", Cost: 9}, {Model: "b", Cost: 9}}}
+	p.SetHost(&usageRecordingHost{fakeHost: &fakeHost{config: map[string]any{configKeyCollect: true}, sessions: []pluginsdk.Session{{ID: "session", TaskID: "task", ACPSessionID: "transcript"}}}, usage: usage})
+	response := sessionCostResponse{ACPSessionID: "transcript", Models: []sessionModel{{Model: "a", Cost: 9}, {Model: "b", Cost: 9}}, sourceEntries: []sessionModelEntry{{SessionID: "transcript", Model: "a", Cost: 9}, {SessionID: "transcript", Model: "b", Cost: 9}}}
 	err := p.persistSessionUsage(context.Background(), "ws", "task", "session", &response)
 	var rejected *usageWriteRejectedError
 	require.ErrorAs(t, err, &rejected)
-	require.True(t, rejected.complete)
-	require.Len(t, rejected.measurements, 2)
+	require.Len(t, rejected.results, 2)
+	for _, result := range rejected.results {
+		require.Equal(t, "conflict", result.Status)
+	}
 }
 
 func TestDatedCollectionRotatesTerminalWork(t *testing.T) {
@@ -87,7 +89,7 @@ func TestHistoricalImportResumesPendingDate(t *testing.T) {
 	p := newPlugin()
 	p.SetHost(host)
 	defer stopPluginWorkers(p)
-	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{Status: importStatusRunning, Cursor: "interrupted-page", Dates: []string{"2026-10-01"}}))
+	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: 2, DiagnosticsReliable: true, Status: importStatusRunning, SnapshotID: "fixture-snapshot", SnapshotUpperBound: 1, Cursor: "interrupted-page", Dates: []string{"2026-10-01"}, PageTargets: []pluginsdk.UsageCollectionTargetV1{{SourceScopeStatus: "eligible", SubjectBinding: "binding:session", TaskID: "task", SessionID: optionalString("session"), ExternalSessionID: optionalString("transcript")}}, PageDates: map[string][]string{"binding:session": {"2026-10-01"}}, PageFound: map[string]bool{}}))
 	var dates []string
 	p.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		for i, arg := range args {

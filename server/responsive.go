@@ -9,6 +9,12 @@ import (
 
 // Close cancels all process-owned work before the signal handler exits.
 func (p *plugin) Close() {
+	p.usageCleanupMu.Lock()
+	p.usageCleanupClosed = true
+	if p.usageCleanupCancel != nil {
+		p.usageCleanupCancel()
+	}
+	p.usageCleanupMu.Unlock()
 	p.collectorMu.Lock()
 	if p.collectorCancel != nil {
 		p.collectorCancel()
@@ -48,7 +54,18 @@ func (p *plugin) responsiveSessionUsage(ctx context.Context, workspaceID, taskID
 	if high < warn {
 		high = warn
 	}
-	saved, hasSaved := p.savedSessionUsage(ctx, workspaceID, taskID, sessionID, warn, high)
+	saved, hasSaved, err := p.loadSavedSessionUsage(ctx, workspaceID, taskID, sessionID, warn, high)
+	if err != nil {
+		return nil, err
+	}
+	if hasSaved && savedUsageReadOnly(saved) {
+		return saved, nil
+	}
+	// Until current source homogeneity is authoritative, disabled collection
+	// keeps an existing canonical selection even on a forced refresh.
+	if hasSaved && saved.Found && cfg[configKeyCollect] != true {
+		return saved, nil
+	}
 	p.toolbar.mu.Lock()
 	active := p.toolbar.active
 	failure := p.toolbar.failure != nil
@@ -60,8 +77,12 @@ func (p *plugin) responsiveSessionUsage(ctx context.Context, workspaceID, taskID
 		}
 		return ""
 	}())
-	if hasSaved && !refresh && !active && !failure && (snapshot == nil || !snapshot.generatedAt.After(savedAt)) {
-		saved.ReportState = reportStateReady
+	if hasSaved && (saved.Found || saved.CanonicalPending) && !refresh && !active && (saved.CanonicalPending || (!failure && (snapshot == nil || !snapshot.generatedAt.After(savedAt)))) {
+		if saved.CanonicalPending {
+			saved.ReportState = reportStatePending
+		} else {
+			saved.ReportState = reportStateReady
+		}
 		return saved, nil
 	}
 	acpID := p.resolveACPSessionID(ctx, taskID, sessionID)
@@ -71,9 +92,20 @@ func (p *plugin) responsiveSessionUsage(ctx context.Context, workspaceID, taskID
 	response := responseForEntries(sessionID, acpID, nil, warn, high, p.now())
 	response.ReportState = reportStateReady
 	if acpID == "" {
+		if hasSaved && (saved.Found || saved.CanonicalPending) {
+			saved.Stale = true
+			if !saved.CanonicalPending {
+				saved.ReportState = reportStateFailed
+				saved.ReportError = reportErrorUnavailable
+			}
+			return saved, nil
+		}
 		response.GeneratedAt = ""
 		response.Tokscale.Installed = false
 		return &response, nil
+	}
+	if err := p.preflightSource(ctx, workspaceID, taskID, sessionID, acpID); err != nil {
+		return p.unavailableSource(saved, sessionID, warn, high, err), nil
 	}
 	command, _ := cfg[configKeyCommand].(string)
 	cmd := resolveCommand(strings.TrimSpace(command), p.lookPath)
@@ -81,25 +113,33 @@ func (p *plugin) responsiveSessionUsage(ctx context.Context, workspaceID, taskID
 	if view.snapshot != nil {
 		response = responseForEntries(sessionID, acpID, view.snapshot.entries, warn, high, view.snapshot.generatedAt)
 		response.Tokscale = view.snapshot.tokscale
+		if err := p.checkTokscaleSnapshot(ctx, &response); err != nil {
+			return p.unavailableSource(saved, sessionID, warn, high, err), nil
+		}
 	}
 	if !response.Found && hasSaved {
 		response = *saved
 	}
-	if view.state == reportStateReady && response.Found && !response.Saved && cfg[configKeyCollect] == true {
-		if err := p.persistSessionUsage(ctx, workspaceID, taskID, sessionID, &response); err != nil {
-			// A rejected revision must never be displayed as the accepted current value.
+	if cfg[configKeyCollect] == true {
+		if view.state == reportStateReady && response.Found && !response.Saved {
+			writeErr := p.persistSessionUsage(ctx, workspaceID, taskID, sessionID, &response)
+			response = *p.canonicalUsageAfterWrite(ctx, workspaceID, taskID, sessionID, &response, saved, writeErr)
+		} else if hasSaved {
+			response = *saved
+		} else {
 			response = responseForEntries(sessionID, acpID, nil, warn, high, p.now())
-			response.Error = "usage was calculated but could not be accepted"
-			response.Stale = true
-		}
-		if canonical, ok := p.savedSessionUsage(ctx, workspaceID, taskID, sessionID, warn, high); ok {
-			canonical.Error = response.Error
-			canonical.Stale = response.Stale
-			response = *canonical
+			response.CostKnown = false
 		}
 	}
-	response.ReportState = view.state
-	response.ReportError = view.errCode
+	// Source readiness does not establish successful Host admission/readback.
+	// Keep a failed saved result and its error code through the action response.
+	if response.ReportState != reportStateFailed {
+		response.ReportState = view.state
+		response.ReportError = view.errCode
+	}
+	if response.CanonicalPending {
+		response.ReportState = reportStatePending
+	}
 	response.Stale = response.Stale || view.stale
 	response.Tokscale.Command = commandDisplay(cmd)
 	response.Tokscale.Source = cmd.Source
