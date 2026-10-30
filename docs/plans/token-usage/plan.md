@@ -693,6 +693,20 @@ The full plugin `server/...` suite passed normally and under the race detector a
 `go vet`, `go mod tidy -diff`, Go formatting, all 68 Node tests, and JavaScript syntax checks passed.
 Logs: `/tmp/usage-history-luna-E5-go-test.log`, `/tmp/usage-history-luna-E5-go-race.log`, `/tmp/usage-history-luna-E5-go-vet.log`, `/tmp/usage-history-luna-E5-tidy-diff.log`, and `/tmp/usage-history-luna-E5-node-all.log`.
 
-The final v0.5.0 package, installed current-Host proofs, and honest older-Host compatibility results remain pending.
-No minimum Kandev release floor is claimed. The full core benchmark remains parent-owned and incomplete.
-Task 06 remains open pending package and integration review.
+The plugin source commit was `1eb3bb1f944820150636cbeef66365f2994004b9`. `make verify-package` built and verified the `0.5.0` archive for Linux amd64/arm64, macOS amd64/arm64, and Windows amd64. The archive SHA-256 is `b53001dc639cddb36c757e798f7c492ec3b2c8fc7543fc73bddf3be35bfb1a9e`.
+
+Five installed-package tests ran against core commit `9a751dd7d88a12307ee3a23130651cb6a0b8f2d3`. The backend used `KANDEV_FEATURES_WORKSPACE_COLLABORATION=true`. Playwright used one worker and zero retries. Desktop passed 1 test and returned errors for 2 tests. Phone passed 1 test and returned an error for 1 test.
+
+Both retained-usage tests expected `CostMetricAbsent=true` for a 150-token row without cost. The Host returned `false`. The Host accepted a report for 1200 subcents. The public stats API returned `cost_subcents=null`.
+
+These errors stopped the flows before the remaining archive, deletion, uninstall, ownership-transfer, and erasure assertions. Those lifecycle and privacy results remain unverified. The plugin assertions did not change.
+
+The Host reduction sets `CostMetricAbsent` from whether a cost source was selected. This matches the observations, but remains an inference. A focused backend test can confirm the cause. Evidence is in `/tmp/usage-history-E5-core-findings.json` and `/tmp/usage-history-luna-E5-ready.json`.
+
+The Go suite includes `TestLegacySessionCostWebhookIsStaticAndDoesNotCallHostOrCLI`. This source test proves that the legacy webhook makes no Host or CLI calls. The installed anonymous-webhook HTTP 401 test did not run.
+
+The current fixture received HTTP 404 from the v0.97 workspace-update API before package upload. The cached v0.97 source is sparse and excludes tracked `apps/tsconfig.json`. Its E2E web build stopped when Vite could not find that file.
+
+The v0.97 test did not establish archive acceptance or `upgrade_required` behavior. No v0.86 binary or source was available, so that test did not run. No older release floor is claimed.
+
+No minimum Kandev release floor is claimed. The parent owns the full-scale core benchmark and core follow-up. Task 06 remains open pending correction of the Host behavior, a successful integration run, and review.

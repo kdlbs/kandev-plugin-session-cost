@@ -293,7 +293,7 @@ The core A3 current-main candidate is prepared but not adopted into primary, so 
 The final package rebuild, actual Host selection and lifecycle checks, and installed desktop/phone browser results also remain pending. Task 06 is still open.
 E2 preparation receipts: `/tmp/usage-history-luna-E2-prep.json`, `/tmp/usage-history-luna-E2R-prep.json`, `/tmp/usage-history-luna-E2R2-prep.json`, and `/tmp/usage-history-luna-E2T-prep.json`.
 
-## Current retained-history status (2026-10-30)
+## Retained-history preparation checkpoint (E2–E4, superseded by E5)
 
 The M3 handler returns fixed upgrade guidance for the legacy GET webhook. The plugin regression proves that this handler makes no Host or CLI calls.
 The manifest marks the webhook `authenticated`. The source smoke helper asserts HTTP 401 for anonymous access, but that check has not run against an installed Host.
@@ -308,8 +308,36 @@ They use `SESSION_COST_EXPECT_ACTION=0` with the same upgrade selector for Kande
 Neither older-Host matrix has run against the current package. The installed Host, package, browser, and anonymous-401 checks remain pending.
 The selector receipts are `/tmp/usage-history-luna-L4-ready.json` and `/tmp/usage-history-luna-O3-ready.json`.
 
-The final SDK pin is pending. `.kandev-sdk-ref` still points to the earlier `9aecf156c65e7522a43f2a1c8310737179c25d70` source revision.
-The full core benchmark is incomplete. Actual Host integration and final package/browser checks remain pending.
+At this checkpoint the final SDK pin, package, and installed Host checks were still pending. The E5 results below supersede that status.
+
+## Current retained-history status (E5, 2026-10-30)
+
+The plugin pins public Kandev commit `9a751dd7d88a12307ee3a23130651cb6a0b8f2d3`. The Go `pluginsdk` tree is `a9a0a09dc8b30ac02876ccc7e46eb18102079600`. Commit `1eb3bb1f944820150636cbeef66365f2994004b9` contains the plugin code. No minimum Kandev release is claimed.
+
+The full `server/...` Go suite passed normal and race runs. `go vet`, module tidy, Go formatting, JavaScript syntax checks, and all 68 Node tests passed. The 68 Node tests include 61 bundle tests and 7 state-inspection tests.
+
+The `0.5.0` archive passed `make verify-package` for all five supported platform binaries. Its SHA-256 is `b53001dc639cddb36c757e798f7c492ec3b2c8fc7543fc73bddf3be35bfb1a9e`.
+
+Five installed-package tests ran against core commit `9a751dd7d88a12307ee3a23130651cb6a0b8f2d3`. The backend used `KANDEV_FEATURES_WORKSPACE_COLLABORATION=true`. Playwright used one worker and zero retries.
+
+Desktop passed the toolbar test. Retained usage and authenticated multi-user tests returned errors. Phone passed the toolbar test. Its retained-usage test returned an error.
+
+Each retained-usage test expected `CostMetricAbsent=true` for a 150-token row. The Host returned `false`. The Host accepted a report for 1200 subcents. The stats API returned `cost_subcents=null`.
+
+These errors stopped the flows before pruning, uninstall, ownership transfer, or erasure checks. These lifecycle and privacy results are unverified. The tests did not change plugin assertions.
+
+The Go suite includes `TestLegacySessionCostWebhookIsStaticAndDoesNotCallHostOrCLI`. This test proves that the legacy webhook makes no Host or CLI calls. The installed anonymous-webhook HTTP 401 check did not run.
+
+The Host reduction sets `CostMetricAbsent` from whether a cost source was selected. This matches the test results, but remains an inference. A focused backend test can confirm this cause.
+
+See `/tmp/usage-history-E5-core-findings.json` for the Host finding. See `/tmp/usage-history-luna-E5-ready.json` for package, command, hash, and test results.
+
+The cached Kandev `v0.97.0` binary was available. The current test fixture returned HTTP 404 for a workspace PATCH request before package upload.
+The matching cached source is a sparse checkout. It omits tracked `apps/tsconfig.json`. Its E2E web build stopped when Vite could not find that file.
+These results do not show if v0.97 accepts the archive or returns `upgrade_required`. No v0.86 binary or source checkout was available. That test did not run.
+Earlier toolbar-only checks do not show current-package compatibility. No older release floor is claimed.
+
+The parent owns the full-scale core benchmark and final integration review. Task 06 remains open until the Host behavior is corrected and lifecycle and privacy checks pass.
 
 ## Settings
 
