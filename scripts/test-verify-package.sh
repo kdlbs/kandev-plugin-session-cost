@@ -66,6 +66,22 @@ rm "$test_dir/valid-host/server/plugin-windows-amd64.exe"
 write_checksums "$test_dir/valid-host"
 sh "$verify_script" "$test_dir/valid-host" host linux-amd64 >/dev/null
 
+copy_fixture normalized-host
+python3 - "$test_dir/normalized-host/manifest.yaml" <<'PYTEST'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_text().replace('id: "kandev-session-cost"', 'id: kandev-session-cost')
+start = s.index('runtime:')
+end = s.index('\n# Read-only', start)
+s = s[:start] + 'runtime:\n    type: binary\n    executables:\n        linux-amd64: server/plugin-linux-amd64\n' + s[end:]
+p.write_text(s)
+PYTEST
+rm "$test_dir/normalized-host/server/plugin-darwin-amd64" "$test_dir/normalized-host/server/plugin-darwin-arm64" "$test_dir/normalized-host/server/plugin-linux-arm64" "$test_dir/normalized-host/server/plugin-windows-amd64.exe"
+write_checksums "$test_dir/normalized-host"
+sh "$verify_script" "$test_dir/normalized-host" host linux-amd64 >/dev/null
+expect_failure 'a host-only manifest presented as a full package' "$test_dir/normalized-host" full
+
 copy_fixture missing-binary
 rm "$test_dir/missing-binary/server/plugin-linux-amd64"
 write_checksums "$test_dir/missing-binary"
@@ -101,6 +117,18 @@ sed 's/^    windows-amd64:/    freebsd-amd64:/' "$test_dir/wrong-platform-set/ma
 mv "$test_dir/wrong-platform-set/manifest.next" "$test_dir/wrong-platform-set/manifest.yaml"
 write_checksums "$test_dir/wrong-platform-set"
 expect_failure 'a manifest with an undeclared platform' "$test_dir/wrong-platform-set" full
+
+copy_fixture unmatched-id-quote
+sed 's/^id: "kandev-session-cost"$/id: "kandev-session-cost/' "$test_dir/unmatched-id-quote/manifest.yaml" > "$test_dir/unmatched-id-quote/manifest.next"
+mv "$test_dir/unmatched-id-quote/manifest.next" "$test_dir/unmatched-id-quote/manifest.yaml"
+write_checksums "$test_dir/unmatched-id-quote"
+expect_failure 'an unmatched id quote' "$test_dir/unmatched-id-quote" full
+
+copy_fixture unmatched-path-quote
+sed 's#linux-amd64: "server/plugin-linux-amd64"#linux-amd64: "server/plugin-linux-amd64#' "$test_dir/unmatched-path-quote/manifest.yaml" > "$test_dir/unmatched-path-quote/manifest.next"
+mv "$test_dir/unmatched-path-quote/manifest.next" "$test_dir/unmatched-path-quote/manifest.yaml"
+write_checksums "$test_dir/unmatched-path-quote"
+expect_failure 'an unmatched executable quote' "$test_dir/unmatched-path-quote" full
 
 expect_failure 'an unsupported host platform' "$test_dir/valid" host freebsd-amd64
 

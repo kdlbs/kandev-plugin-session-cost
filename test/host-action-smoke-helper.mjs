@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const hostRoot = process.env.KANDEV_HOST_ROOT || fileURLToPath(new URL("../../kandev", import.meta.url));
 
-function createTokscaleFixture() {
+export function createTokscaleFixture() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "session-cost-tokscale-"));
   const scriptPath = path.join(directory, "tokscale-fixture");
   const script = `#!/bin/sh
@@ -51,7 +51,7 @@ cat "$directory/report.json"
   };
 }
 
-async function getACPTranscriptId(apiClient, sessionId, expect) {
+export async function getACPTranscriptId(apiClient, sessionId, expect) {
   let transcriptId = "";
   await expect
     .poll(
@@ -66,6 +66,17 @@ async function getACPTranscriptId(apiClient, sessionId, expect) {
     )
     .toBeTruthy();
   return transcriptId;
+}
+
+export async function installSessionCostPackage(testPage, packagePath, expect) {
+  await testPage.goto("/settings/plugins");
+  await testPage.getByTestId("install-plugin-trigger").click();
+  await expect(testPage.getByTestId("install-plugin-dialog")).toBeVisible();
+  await testPage.getByTestId("install-plugin-tab-upload").click();
+  await testPage.getByTestId("install-plugin-file-input").setInputFiles(packagePath);
+  await testPage.getByTestId("install-plugin-upload-submit").click();
+  await expect(testPage.getByTestId("install-plugin-dialog")).toBeHidden({ timeout: 30_000 });
+  await expect(testPage.getByTestId("plugin-row-kandev-session-cost")).toBeVisible();
 }
 
 function reportEntry(sessionId, cost) {
@@ -160,6 +171,7 @@ export async function runSessionCostHostSmoke({
   apiClient,
   seedData,
   expectAction,
+  expectUpgradeRequired = false,
   touch,
   expect,
   backend,
@@ -174,17 +186,11 @@ export async function runSessionCostHostSmoke({
   let fixture;
   await apiClient.rawRequest("DELETE", "/api/plugins/kandev-session-cost").catch(() => undefined);
   try {
-    await testPage.goto("/settings/plugins");
-    await testPage.getByTestId("install-plugin-trigger").click();
-    await expect(testPage.getByTestId("install-plugin-dialog")).toBeVisible();
-    await testPage.getByTestId("install-plugin-tab-upload").click();
-    await testPage.getByTestId("install-plugin-file-input").setInputFiles(packagePath);
-    await testPage.getByTestId("install-plugin-upload-submit").click();
-    await expect(testPage.getByTestId("install-plugin-dialog")).toBeHidden({ timeout: 30_000 });
-    await expect(testPage.getByTestId("plugin-row-kandev-session-cost")).toBeVisible();
+    await installSessionCostPackage(testPage, packagePath, expect);
     installed = true;
 
     fixture = createTokscaleFixture();
+    if (expectUpgradeRequired) fixture.release("release-first");
     const configResponse = await apiClient.rawRequest("PATCH", "/api/plugins/kandev-session-cost", {
       config: { command: `/bin/sh ${fixture.scriptPath}` },
     });
@@ -193,13 +199,33 @@ export async function runSessionCostHostSmoke({
     }
 
     const requests = [];
+    const usageResponses = [];
     testPage.on("request", (request) => {
       const requestUrl = new URL(request.url());
-      if (!requestUrl.pathname.endsWith("/webhooks/session-cost")) return;
+      const action = requestUrl.pathname.endsWith("/actions/session-usage");
+      if (!action && !requestUrl.pathname.endsWith("/webhooks/session-cost")) return;
+      const payload = action ? request.postDataJSON() : null;
       requests.push({
-        taskId: requestUrl.searchParams.get("task_id"),
-        active: requestUrl.searchParams.get("active"),
-        refresh: requestUrl.searchParams.get("refresh") === "1",
+        taskId: action ? payload?.taskId : requestUrl.searchParams.get("task_id"),
+        active: action ? payload?.sessionId : requestUrl.searchParams.get("active"),
+        refresh: action ? Boolean(payload?.body?.refresh) : requestUrl.searchParams.get("refresh") === "1",
+      });
+    });
+    testPage.on("response", (response) => {
+      const responseUrl = new URL(response.url());
+      const isAction =
+        responseUrl.pathname.endsWith("/actions/session-usage") &&
+        response.request().method() === "POST";
+      const isLegacyWebhook =
+        responseUrl.pathname.endsWith("/webhooks/session-cost") &&
+        response.request().method() === "GET";
+      if ((expectAction && !isAction) || (!expectAction && !isLegacyWebhook)) return;
+
+      const payload = isAction ? response.request().postDataJSON() : null;
+      usageResponses.push({
+        response,
+        taskId: isAction ? payload?.taskId : responseUrl.searchParams.get("task_id"),
+        sessionId: isAction ? payload?.sessionId : responseUrl.searchParams.get("active"),
       });
     });
 
@@ -207,8 +233,37 @@ export async function runSessionCostHostSmoke({
     if (expectAction) {
       dialog = await openQuickChatDialog(testPage, touch, expectAction, expect);
       const setup = await openNewQuickChatSetup(dialog, testPage, expect);
-      const startButton = setup.getByTestId("quick-chat-start");
+      const openingAction = setup.getByRole("button", { name: "Session cost", exact: true });
+      await expect(openingAction).toBeVisible();
+      await expect(openingAction).toHaveAttribute("id", "session-cost-action");
+      await expect(openingAction).toHaveAttribute("data-slot", "surface-action");
+      await expect(openingAction).toHaveAttribute("data-surface", "composer");
+      await expect(openingAction).toHaveAttribute("aria-label", "Session cost");
+      const startButton = setup.getByTestId("quick-chat-send");
+      // The host sends disabled=true to plugin actions while this empty
+      // opening composer cannot submit. Session Cost remains an independent,
+      // read-only action that explains there is no active session to load.
       await expect(startButton).toBeDisabled();
+      await expect(openingAction).toBeEnabled();
+
+      if (touch) {
+        const bounds = await waitForTouchTarget(openingAction, expect);
+        expect(bounds).not.toBeNull();
+        await openingAction.tap();
+      } else {
+        await openingAction.focus();
+        await expect(openingAction).toBeFocused();
+        await openingAction.press("Enter");
+      }
+      await expect(openingAction).toHaveAttribute("aria-expanded", "true");
+      await expect(
+        testPage
+          .locator('[data-slot="tooltip-content"]:visible')
+          .getByText("Open to load session cost", { exact: true })
+          .first(),
+      ).toBeVisible();
+      await testPage.keyboard.press("Escape");
+      await expect(openingAction).toHaveAttribute("aria-expanded", "false");
 
       const { dwell } = await import(
         pathToFileURL(path.join(hostRoot, "apps/web/e2e/helpers/causal-waits.ts")).href
@@ -217,7 +272,7 @@ export async function runSessionCostHostSmoke({
         testPage,
         250,
         "negative-assertion",
-        "the Quick Chat setup has no active session or composer action, so Session Cost must not request usage",
+        "the Quick Chat opening composer has no active session, so the cost action must not fetch usage",
       );
       expect(requests).toHaveLength(0);
 
@@ -225,12 +280,17 @@ export async function runSessionCostHostSmoke({
         pathToFileURL(path.join(hostRoot, "apps/web/e2e/tests/chat/quick-chat-helpers.ts")).href
       );
       await selectAgentIfNeeded(dialog, testPage);
+      // A selected profile still cannot submit an empty prompt. Check that the
+      // host's composer-disabled state does not disable this read-only action.
+      await expect(startButton).toBeDisabled();
+      await expect(openingAction).toBeEnabled();
       const startResponsePromise = testPage.waitForResponse(
         (response) =>
           new URL(response.url()).pathname.endsWith("/quick-chat") &&
           response.request().method() === "POST",
         { timeout: 30_000 },
       );
+      await setup.getByTestId("task-description-input").fill("Session Cost action smoke");
       await expect(startButton).toBeEnabled({ timeout: 10_000 });
       if (touch) await startButton.tap();
       else await startButton.click();
@@ -257,17 +317,24 @@ export async function runSessionCostHostSmoke({
       dialog = await openQuickChatDialog(testPage, touch, expectAction, expect);
     }
 
-    secondQuickChat = await apiClient.startQuickChat(
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      "Session Cost second-session smoke",
-    );
-    const primaryTranscriptId = await getACPTranscriptId(apiClient, quickChat.session_id, expect);
-    const secondTranscriptId = await getACPTranscriptId(apiClient, secondQuickChat.session_id, expect);
-    fixture.writeReport([
-      reportEntry(primaryTranscriptId, 123456789.12),
-      reportEntry(secondTranscriptId, 2.5),
-    ]);
+    let primaryTranscriptId;
+    let secondTranscriptId;
+    if (!expectUpgradeRequired) {
+      secondQuickChat = await apiClient.startQuickChat(
+        seedData.workspaceId,
+        seedData.agentProfileId,
+        "Session Cost second-session smoke",
+      );
+      primaryTranscriptId = await getACPTranscriptId(apiClient, quickChat.session_id, expect);
+      secondTranscriptId = await getACPTranscriptId(apiClient, secondQuickChat.session_id, expect);
+      fixture.writeReport([
+        reportEntry(primaryTranscriptId, 123456789.12),
+        reportEntry(secondTranscriptId, 2.5),
+      ]);
+    } else if (!expectAction) {
+      // The legacy toolbar only requests usage for a session with a known ACP transcript.
+      primaryTranscriptId = await getACPTranscriptId(apiClient, quickChat.session_id, expect);
+    }
 
     const openQuickChat = async () => {
       return openQuickChatDialog(testPage, touch, expectAction, expect);
@@ -354,13 +421,78 @@ export async function runSessionCostHostSmoke({
     await expect.poll(() => requests.length, { timeout: 10_000 }).toBe(1);
     expect(requests[0].taskId).toBe(quickChat.task_id);
     expect(requests[0].active).toBe(quickChat.session_id);
+    if (expectUpgradeRequired) {
+      const matchingResponse = () =>
+        usageResponses.find((item) => item.taskId === quickChat.task_id && item.sessionId === quickChat.session_id);
+      await expect
+        .poll(
+          () => Boolean(matchingResponse()),
+          { timeout: 10_000 },
+        )
+        .toBe(true);
+      const { response } = matchingResponse();
+      expect(response.request().method()).toBe(expectAction ? "POST" : "GET");
+      expect(response.status()).toBe(200);
+      const payload = await response.json();
+      if (expectAction) {
+        expect(payload.compatibility).toBe("upgrade_required");
+        expect(payload.found).toBe(false);
+        expect(payload.saved).toBe(false);
+        expect(payload.cost_known).toBe(false);
+        expect(payload.cost).toBe(0);
+        expect(payload.input).toBe(0);
+        expect(payload.output).toBe(0);
+        expect(payload.cache_read).toBe(0);
+        expect(payload.cache_write).toBe(0);
+        expect(payload.reasoning).toBe(0);
+        expect(payload.total).toBe(0);
+        expect(payload.turns).toBe(0);
+        expect(payload.cost_per_turn).toBe(0);
+        expect(payload.models).toEqual([]);
+        expect(payload).not.toHaveProperty("token_amounts");
+      } else {
+        expect(payload).toEqual({
+          compatibility: "upgrade_required",
+          error: "Use the authenticated session-usage action to view or refresh usage.",
+        });
+        const legacyUsageFields = [
+          "task_id",
+          "kandev_session_id",
+          "acp_session_id",
+          "found",
+          "saved",
+          "cost_known",
+          "amounts",
+          "token_amounts",
+          "cost",
+          "input",
+          "output",
+          "cache_read",
+          "cache_write",
+          "reasoning",
+          "total",
+          "turns",
+          "cost_per_turn",
+          "models",
+        ];
+        expect(
+          legacyUsageFields.filter((field) => Object.prototype.hasOwnProperty.call(payload, field)),
+          "legacy webhook guidance must not expose identifiers, token usage, or cost",
+        ).toEqual([]);
+      }
+      expect(fs.existsSync(fixture.marker("run-count"))).toBe(false);
+      return;
+    }
     const tooltip = testPage.locator('[data-slot="tooltip-content"]:visible');
     await expect(tooltip.getByText("Calculating cost…", { exact: true }).first()).toBeVisible();
     await expect.poll(() => fs.existsSync(fixture.marker("first-started")), { timeout: 10_000 }).toBe(true);
     const concurrentLookupStartedAt = Date.now();
     const concurrentLookup = await testPage.evaluate(async ({ taskId, sessionId }) => {
-      const query = new URLSearchParams({ task_id: taskId, active: sessionId });
-      const response = await fetch(`/api/plugins/kandev-session-cost/webhooks/session-cost?${query}`);
+      const response = await fetch("/api/plugins/kandev-session-cost/actions/session-usage", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ taskId, sessionId, body: {} }),
+      });
       return { status: response.status, payload: await response.json() };
     }, { taskId: secondQuickChat.task_id, sessionId: secondQuickChat.session_id });
     expect(Date.now() - concurrentLookupStartedAt).toBeLessThan(5_000);

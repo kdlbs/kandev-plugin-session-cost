@@ -14,7 +14,7 @@ export default {
   projects: [
     {
       name: "chromium",
-      testMatch: "host-action-smoke.spec.mjs",
+      testMatch: ["host-action-smoke.spec.mjs", "retained-usage-auth-smoke.spec.mjs"],
       use: { browserName: "chromium", viewport: { width: 1280, height: 800 } },
     },
     {

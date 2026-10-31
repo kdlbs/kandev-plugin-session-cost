@@ -1,0 +1,45 @@
+[
+  {
+    "log": "usage-history-luna-E6-managed-chromium-r7.log",
+    "sha256": "f9b2224e5c5dc2ee19451f1efd1e54169e212c90b1cee101dc96eb8e99b1c01b",
+    "results": [
+      "1 failed",
+      "2 passed (2.0m)"
+    ]
+  },
+  {
+    "log": "usage-history-luna-E6-managed-chromium-r12.log",
+    "sha256": "74093f42c7c553252e32679d2ca60bc783949681231611a0c8dec20b7e109861",
+    "results": [
+      "1 passed (42.7s)"
+    ]
+  },
+  {
+    "log": "usage-history-luna-E6-managed-mobile-r2.log",
+    "sha256": "aea50b2ab49a2e8173863a6c2ebaf1c0d536e41968d47d8d04248c3552674816",
+    "results": [
+      "2 passed (1.2m)"
+    ]
+  },
+  {
+    "log": "usage-history-luna-E6-v097-desktop-r1.log",
+    "sha256": "1aa0c8dcf7f3f964698c0f30255c49d96105adc91efec6aa010a882fbc25f2df",
+    "results": [
+      "1 passed (7.1s)"
+    ]
+  },
+  {
+    "log": "usage-history-luna-E6-v097-phone-r1.log",
+    "sha256": "19ebf39048aa5818250942ae2a8c53f87e1b571ba6e7e3c355474e4134ed138b",
+    "results": [
+      "1 passed (9.0s)"
+    ]
+  },
+  {
+    "log": "usage-history-luna-E6-v086-desktop-r1.log",
+    "sha256": "7078422fe8caf63b1fd7e64a13226b81beafdc24acc678bc2722e431cc2f3436",
+    "results": [
+      "1 passed (5.9s)"
+    ]
+  }
+]
