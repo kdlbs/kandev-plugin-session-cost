@@ -72,10 +72,11 @@ The Go and frontend SDK source pin is public Kandev commit
 context propagation and the retained usage-history APIs used by this plugin.
 This source revision is not a Kandev release number. The UI detects Action and
 retains the Button path for older hosts. The manifest does not declare a minimum
-Kandev version, and this plugin does not claim a release floor. Historical
-plugin-source UI checks against Kandev `v0.97.0` and `v0.86.0` covered the earlier
-toolbar contract only. They do not establish that the current package is
-accepted by those Hosts or that retained usage works there.
+Kandev version, and this plugin does not claim a release floor. The exact `0.5.0`
+archive was accepted by tagged `v0.97.0` and `v0.86.0` Hosts. Installed browser
+checks received upgrade guidance through the v0.97 POST action and the v0.86
+legacy GET route. These checks do not establish retained-usage support on those
+older Hosts.
 
 ## Retained usage development
 
@@ -310,7 +311,7 @@ The selector receipts are `/tmp/usage-history-luna-L4-ready.json` and `/tmp/usag
 
 At this checkpoint the final SDK pin, package, and installed Host checks were still pending. The E5 results below supersede that status.
 
-## Current retained-history status (E5, 2026-10-30)
+## Initial retained-history status (E5, 2026-10-30; superseded by E6)
 
 The plugin pins public Kandev commit `9a751dd7d88a12307ee3a23130651cb6a0b8f2d3`. The Go `pluginsdk` tree is `a9a0a09dc8b30ac02876ccc7e46eb18102079600`. Commit `1eb3bb1f944820150636cbeef66365f2994004b9` contains the plugin code. No minimum Kandev release is claimed.
 
@@ -338,6 +339,77 @@ These results do not show if v0.97 accepts the archive or returns `upgrade_requi
 Earlier toolbar-only checks do not show current-package compatibility. No older release floor is claimed.
 
 The parent owns the full-scale core benchmark and final integration review. Task 06 remains open until the Host behavior is corrected and lifecycle and privacy checks pass.
+
+## Current integration and compatibility status (E6, 2026-10-31)
+
+The tested archive is `kandev-session-cost-0.5.0.tar.gz`, SHA-256
+`b53001dc639cddb36c757e798f7c492ec3b2c8fc7543fc73bddf3be35bfb1a9e`. It was
+built from plugin source commit `1eb3bb1f944820150636cbeef66365f2994004b9` and
+pins Kandev SDK commit `9a751dd7d88a12307ee3a23130651cb6a0b8f2d3`.
+
+C6 confirmed a PostgreSQL precision bug. PostgreSQL rounded the point-coverage
+timestamps for the native event and matching reported price to the same
+microsecond. The overlap check then discarded the matching price. Core commit
+`98580f996c3867c7db9e87fabc0c321c4f1586e9` introduces the fix and its regression.
+C6's focused normal and race runs passed with SQLite and PostgreSQL 18.6.
+Receipt: `/tmp/usage-history-luna-C6-metric-ready.json`.
+
+The plugin fixtures now follow the confirmed metric contract. A native row with
+150 known tokens and no price has applicable unknown cost
+(`CostMetricAbsent=false`, `CostSubcents=nil`). The positive aggregate-price
+case uses the native event's exact source ID, model, provider, and observation
+time. A positive but unrelated price keeps aggregate cost unknown. Zero,
+unknown-token, partial-cost, and mixed-currency assertions remain in the smoke.
+
+Five installed-package browser tests passed on the coordinated v0.98.0-264 Host
+build. The desktop action and authenticated multi-user tests passed in run r7;
+desktop retention passed in r12; both phone tests passed in run r2. Playwright
+used one worker, zero retries, and the normal artifact checks. The retained flow
+reached restart, archive, task/session deletion, uninstall, and retained stats
+display. The stats page showed two unavailable sessions, 300 tokens, and $0.24,
+with no links to deleted tasks or sessions. The authenticated test passed
+anonymous legacy GET denial (HTTP 401), cross-workspace denial, and fixed
+upgrade guidance for authenticated users. The guidance exposed no usage values
+or target IDs, ran no Tokscale fixture command, and left usage totals unchanged.
+
+The Tokscale fixture returned an empty report. The import status completed and
+accounted for every processed target as missing. This verifies bounded import
+status and diagnostics; it does not show that Tokscale data was imported.
+
+The same unchanged archive was accepted by the exact tagged older Hosts:
+
+- Kandev `v0.97.0`, source `e43881c7555372897b57ec51c705f1e05da43c40`:
+  upload returned HTTP 201. The installed desktop and phone UI checks used the
+  POST action and received `upgrade_required`. Backend binary SHA-256:
+  `254985bbdc8a54896eca93893512445f1d1fff86006ae5afd2e9f230dd6505e5`.
+  The exact tagged E2E web build followed restoration of tracked
+  `apps/tsconfig.json`, omitted by the sparse checkout. Its index SHA-256 is
+  `996ce058a2a14bae86b95511a3fd52e5bb67ff49acec8764850aca9e03720227`.
+- Kandev `v0.86.0`, official tag source
+  `50a65247dd8871e5857c0cdefb50c127c790360b`: upload returned HTTP 201 and the
+  manifest reported version `0.5.0` with active status. The installed desktop
+  UI used the legacy GET route and received the fixed `upgrade_required`
+  response. Backend binary SHA-256:
+  `30b2bef8a6c355e7fe7b1f0bf5674b9a0c83e0d48924d46584450d34adfe98a9`.
+  Its tagged E2E web index SHA-256 is
+  `63cf2843e0c62a83c38c8d8d52d8735f669fa55075c6eb6241e347294037009d`.
+
+These older-Host checks prove archive acceptance and the tested upgrade-guidance
+routes. They do not prove retained-usage support on either older Host, and they
+do not establish a minimum Kandev release. The v0.86 phone route was not run.
+
+The current Host browser logs are `/tmp/usage-history-luna-E6-managed-chromium-r7.log`,
+`/tmp/usage-history-luna-E6-managed-chromium-r12.log`, and
+`/tmp/usage-history-luna-E6-managed-mobile-r2.log`. The v0.97 logs are
+`/tmp/usage-history-luna-E6-v097-api-probe.log`,
+`/tmp/usage-history-luna-E6-v097-desktop-r1.log`, and
+`/tmp/usage-history-luna-E6-v097-phone-r1.log`. The v0.86 API and desktop logs
+are `/tmp/session-cost-e6-v086-api-r3/backend-stdout.log` and
+`/tmp/usage-history-luna-E6-v086-desktop-r1.log`.
+
+E6 changed only plugin smoke fixtures and this evidence. The package archive and
+production plugin source are unchanged. The full source test suites from E5 were
+not repeated. Parent review and CI remain pending.
 
 ## Settings
 
@@ -528,3 +600,5 @@ the new collection and saved-usage APIs. Merge the core dependency before this P
 ## License
 
 See [LICENSE](LICENSE).
+
+Parent review corrected the archive digest transcription and reran the seven state-inspection tests: all passed. Runtime plugin source and archive remain unchanged. Durable verification and log hashes are in `docs/plans/token-usage/evidence/e6-integration-20261031/`. Public CI and the core performance gates remain pending.

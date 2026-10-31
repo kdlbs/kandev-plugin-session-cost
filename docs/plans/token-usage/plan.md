@@ -710,3 +710,63 @@ The current fixture received HTTP 404 from the v0.97 workspace-update API before
 The v0.97 test did not establish archive acceptance or `upgrade_required` behavior. No v0.86 binary or source was available, so that test did not run. No older release floor is claimed.
 
 No minimum Kandev release floor is claimed. The parent owns the full-scale core benchmark and core follow-up. Task 06 remains open pending correction of the Host behavior, a successful integration run, and review.
+
+## E6 integrated validation (2026-10-31)
+
+The E5 section above records the initial failures. C6 later confirmed the
+PostgreSQL point-coverage precision bug and fixed it in core commit
+`98580f996c3867c7db9e87fabc0c321c4f1586e9`. C6's focused normal and race runs
+passed with SQLite and PostgreSQL 18.6. See
+`/tmp/usage-history-luna-C6-metric-ready.json`.
+
+The retained-usage fixtures now use the confirmed contract. Native tokens with
+no matching price have applicable unknown cost. A positive aggregate-price
+report uses the native event's exact source ID, model, provider, and observation
+time. A positive unrelated report keeps cost unknown. Zero, unknown-token,
+partial-cost, and mixed-currency checks remain.
+
+Five installed-package browser tests passed against coordinated Host build
+`v0.98.0-264`. Desktop action and authenticated multi-user tests passed in r7;
+desktop retention passed in r12; phone action and retention passed in r2. The
+retention run reached restart, archive, task/session deletion, uninstall, and
+stats display. Both deleted sessions remained unavailable, without links, and
+the summary showed 300 tokens and $0.24. The authenticated test passed anonymous
+legacy GET denial (HTTP 401), cross-workspace denial, and fixed guidance for
+authenticated users. The response exposed no usage values or target IDs, ran no
+Tokscale fixture command, and left usage totals unchanged.
+
+The import fixture used an empty Tokscale report. The import completed and
+reported every processed target as missing. This verifies status and
+diagnostics only; it does not prove successful source-data import.
+
+The unchanged `0.5.0` archive, SHA-256
+`b53001dc639cddb36c757e798f7c492ec3b2c8fc7543fc73bddf3be35bfb1a9e`, was
+accepted by both exact older Host sources:
+
+- Kandev `v0.97.0`, source `e43881c7555372897b57ec51c705f1e05da43c40`:
+  API upload returned HTTP 201. Desktop and phone browser checks exercised the
+  POST action and received `upgrade_required`.
+- Kandev `v0.86.0`, official tag source
+  `50a65247dd8871e5857c0cdefb50c127c790360b`: API upload returned HTTP 201;
+  the response reported plugin version `0.5.0` and active status. The tagged
+  desktop UI exercised the legacy GET route and received fixed
+  `upgrade_required` guidance. The phone route was not run.
+
+The first v0.97 run stopped before upload on an unsupported optional workspace
+PATCH. The fixture bootstrap now skips only that unsupported reset in
+upgrade-only mode. The v0.97 sparse checkout also omitted tracked
+`apps/tsconfig.json`; E6 restored it before building the tagged web app. The
+first v0.86 readiness poll used `/ready`; the tagged server exposes `/health`.
+Both setup issues were corrected before recording compatibility results. Neither
+failed setup attempt counts as a package verdict.
+
+These older-Host checks establish archive acceptance and the tested upgrade
+routes. They do not establish retained-usage support or a minimum release.
+The full E5 Go and Node suites were not repeated because production plugin
+source and the archive did not change. E6 changed only smoke fixtures and these
+records. Parent review and CI remain pending.
+
+Evidence logs are listed in the E6 section of the plugin README and in
+`/tmp/usage-history-luna-E6-ready.json`.
+
+Parent review corrected the archive digest transcription and reran the seven state-inspection tests: all passed. Runtime plugin source and archive remain unchanged. Durable verification and log hashes are in `evidence/e6-integration-20261031/`. Public CI and the core performance gates remain pending.

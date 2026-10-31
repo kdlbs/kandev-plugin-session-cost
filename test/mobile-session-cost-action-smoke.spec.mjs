@@ -1,12 +1,8 @@
-import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { runSessionCostHostSmoke } from "./host-action-smoke-helper.mjs";
 import { runSessionCostRetentionSmoke } from "./retained-usage-smoke-helper.mjs";
+import { loadSessionCostHostFixtures } from "./host-test-fixtures.mjs";
 
-const hostRoot = process.env.KANDEV_HOST_ROOT || fileURLToPath(new URL("../../kandev", import.meta.url));
-const { test, expect } = await import(
-  pathToFileURL(path.join(hostRoot, "apps/web/e2e/fixtures/test-base.ts")).href
-);
+const { test, expect } = await loadSessionCostHostFixtures();
 const expectAction = process.env.SESSION_COST_EXPECT_ACTION === "1";
 const expectUpgradeRequired = process.env.SESSION_COST_EXPECT_UPGRADE_REQUIRED === "1";
 

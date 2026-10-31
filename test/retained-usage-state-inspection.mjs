@@ -194,7 +194,13 @@ function assertUsageTarget(value) {
     assertOptionalNullableString(target, key, { pattern: timestampPattern });
   }
   for (const key of ["SubjectBinding", "TaskID", "SubjectKind", "ActorAttributionStatus", "SnapshotID"]) {
-    assertOptionalString(target, key, { empty: key === "SubjectKind" || key === "ActorAttributionStatus" });
+    try {
+      assertOptionalString(target, key, {
+        empty: ["SubjectKind", "ActorAttributionStatus", "SnapshotID"].includes(key),
+      });
+    } catch {
+      fail(`usage target checkpoint contains an invalid ${key}`);
+    }
   }
   for (const key of ["SessionID", "ExternalSessionID"]) assertOptionalNullableString(target, key);
   if (Object.hasOwn(target, "SnapshotUpperBound")) assertNonnegativeInteger(target.SnapshotUpperBound);

@@ -1,0 +1,281 @@
+{
+  "worker": "E6",
+  "task": "Session Cost installed-host integration and old-host compatibility evidence",
+  "status": "ready_for_parent_review",
+  "date": "2026-10-31",
+  "workspace": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kdlbs-kandev-plugin-session-cost",
+  "plugin": {
+    "base_head": "9531a2293afe6dfae6b2c623632433fb26ba6134",
+    "code_commit": "1eb3bb1f944820150636cbeef66365f2994004b9",
+    "sdk_pin": "9a751dd7d88a12307ee3a23130651cb6a0b8f2d3",
+    "sdk_tree": "a9a0a09dc8b30ac02876ccc7e46eb18102079600",
+    "package_path": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kdlbs-kandev-plugin-session-cost/kandev-session-cost-0.5.0.tar.gz",
+    "package_version": "0.5.0",
+    "package_sha256": "b53001dc639cddb36c757e798f7c492ec3b2c8fc7543fc73bddf3be35bfb1a9e",
+    "package_rebuilt_during_E6": false,
+    "package_verify": "make verify-package previously passed for five platform binaries; not repeated because archive and production plugin source were unchanged"
+  },
+  "core_artifacts": {
+    "public_core_head_at_run": "863769e72e8cf25f0035afafaa75b5f1e66da4be",
+    "actual_build_source": "68244c2fbd9df85917749eb3d7218ebcde3e93d1",
+    "version": "v0.98.0-264-g68244c2fbd9",
+    "parent_build_receipt": "/tmp/usage-history-core-coordinated-host-ready.json",
+    "parent_build_command": "make -C apps/backend build e2e-plugin-package build-e2e-delivery-fixture",
+    "parent_build_exit": 0,
+    "backend_contains_C6_fix": true,
+    "web_rebuilt_for_E6": false,
+    "web_index_sha256": "2d69e2196461414bf5d4aa02bcf8c3d88328affb1b2d13572571733a4eb1c357",
+    "backend_sha256": "0151cadcc416aba226c320641955eda7ae61093bdee3c02cb88d098e8f647caa",
+    "agentctl_sha256": "bae6f0327d2b841fcf62b4139444d530b46792d4d71b1215628d6a28e951bc48",
+    "delivery_fixture_path": "apps/backend/bin/e2e-delivery-fixture",
+    "delivery_fixture_sha256": "d47a5b2c22b0f20aed1185fd93a07753e87abadbd11ce919edc97026020f8ce2",
+    "freshness_bypass": false,
+    "core_outputs_overwritten_by_E6": false
+  },
+  "confirmed_root_cause_and_fixture_contract": {
+    "receipt": "/tmp/usage-history-luna-C6-metric-ready.json",
+    "root_cause": "PostgreSQL TIMESTAMP precision collapsed native and matching reported point-coverage intervals to the same microsecond. The overlap predicate then discarded the exact matching price.",
+    "core_fix": "Accepted exact equality for explicitly marked point coverage while preserving interval overlap semantics.",
+    "focused_normal_and_race": "Passed with SQLite and PostgreSQL 18.6.",
+    "fixture_rules": [
+      "150 native tokens with no selected price means CostMetricAbsent=false and CostSubcents=null: applicable unknown cost.",
+      "Positive aggregate price uses the exact native provider_event SourceRecordID, model, provider, and ObservedAt.",
+      "Unrelated positive cost keeps the native event's applicable unknown cost and aggregate unknown.",
+      "Zero, unknown-token, partial-cost, and mixed-currency assertions remain; no global missing-cost flag inversion."
+    ]
+  },
+  "current_host_e2e": {
+    "runner": "managed run-e2e.sh, --host --no-build, normal freshness checks, strict mode, one worker, zero retries",
+    "capture_assets_env": "unset explicitly with env -u CAPTURE_PR_ASSETS",
+    "desktop_port_offset": 28,
+    "phone_port_offset": 29,
+    "current_session_tests_final": [
+      {
+        "name": "desktop composer action and disclosure behavior",
+        "result": "passed",
+        "run": "r7",
+        "log": "/tmp/usage-history-luna-E6-managed-chromium-r7.log"
+      },
+      {
+        "name": "desktop authenticated multi-user, access, and retained-history privacy flow",
+        "result": "passed",
+        "run": "r7",
+        "log": "/tmp/usage-history-luna-E6-managed-chromium-r7.log",
+        "assertions_reached": [
+          "anonymous legacy GET returns HTTP 401",
+          "cross-workspace stats and action requests return HTTP 404",
+          "authenticated legacy GET returns fixed upgrade_required body with no usage values or target IDs",
+          "Tokscale fixture run count is unchanged and workspace/native usage totals remain unchanged"
+        ]
+      },
+      {
+        "name": "desktop retained usage through restart, archive, task/session deletion, uninstall, and stats display",
+        "result": "passed",
+        "run": "r12",
+        "log": "/tmp/usage-history-luna-E6-managed-chromium-r12.log"
+      },
+      {
+        "name": "phone composer action and disclosure behavior",
+        "result": "passed",
+        "run": "r2",
+        "log": "/tmp/usage-history-luna-E6-managed-mobile-r2.log"
+      },
+      {
+        "name": "phone retained usage through restart, archive, deletion, uninstall, and stats display",
+        "result": "passed",
+        "run": "r2",
+        "log": "/tmp/usage-history-luna-E6-managed-mobile-r2.log"
+      }
+    ],
+    "final_case_count": 5,
+    "retention_assertions": {
+      "canonical_tokens_and_matching_price_preserved": true,
+      "deleted_sessions_unavailable_without_links": true,
+      "two_stats_rows": true,
+      "summary_tokens": 300,
+      "summary_cost_usd": 0.24,
+      "Tokscale_fixture_source_report": "empty",
+      "import_status": "completed; every processed target reported missing",
+      "successful_source_data_import_proven": false
+    },
+    "zero_retry_intermediate_attempts": [
+      {
+        "run": "desktop r7 retention in the initial three-test run",
+        "result": "failed at wire DTO assertion because token counts were JSON decimal strings while the fixture expected JavaScript numbers",
+        "corrected_by": "expect decimal strings from the Host DTO",
+        "log": "/tmp/usage-history-luna-E6-managed-chromium-r7.log"
+      },
+      {
+        "run": "desktop r9 retention",
+        "result": "failed because the empty Tokscale report correctly marked all 2 processed targets missing",
+        "corrected_by": "assert processed >= 2 and missing === processed; do not imply imported records",
+        "log": "/tmp/usage-history-luna-E6-managed-chromium-r9.log"
+      },
+      {
+        "run": "desktop r10 retention",
+        "result": "reached uninstall and found one fixture-owned source row",
+        "corrected_by": "assert the fixture-owned reported-native-cost row and exact version/cost",
+        "log": "/tmp/usage-history-luna-E6-managed-chromium-r10.log"
+      },
+      {
+        "run": "desktop r11 retention",
+        "result": "found two unavailable session rows because the delivery smoke creates a second task/session",
+        "corrected_by": "assert both rows and aggregate 300 tokens/$0.24",
+        "log": "/tmp/usage-history-luna-E6-managed-chromium-r11.log"
+      },
+      {
+        "run": "phone r1 retention",
+        "result": "failed because the extra eligible target made processed/missing 3, not the fixture's expected 2",
+        "corrected_by": "assert missing === processed",
+        "log": "/tmp/usage-history-luna-E6-managed-mobile-r1.log"
+      }
+    ],
+    "example_final_command": "env -u CAPTURE_PR_ASSETS NODE_OPTIONS=--import=tsx GOMAXPROCS=1 E2E_PORT_OFFSET=28 KANDEV_HOST_ROOT=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev SESSION_COST_PACKAGE_PATH=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kdlbs-kandev-plugin-session-cost/kandev-session-cost-0.5.0.tar.gz SESSION_COST_EXPECT_ACTION=1 pnpm run e2e:run --host --no-build --shards 1 --project chromium -- --config=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kdlbs-kandev-plugin-session-cost/test/host-action-smoke.playwright.config.mjs --grep='retains real Host admitted usage through restart, archive, deletion and uninstall' --workers=1 --retries=0 --output=/tmp/session-cost-e6-managed-chromium-r12"
+  },
+  "older_host_compatibility": [
+    {
+      "version": "v0.97.0",
+      "source_commit": "e43881c7555372897b57ec51c705f1e05da43c40",
+      "binary_path": "/root/.cache/kandy-v0970/runtime/kandev/bin/kandev",
+      "binary_sha256": "254985bbdc8a54896eca93893512445f1d1fff86006ae5afd2e9f230dd6505e5",
+      "web_index_sha256": "996ce058a2a14bae86b95511a3fd52e5bb67ff49acec8764850aca9e03720227",
+      "archive_upload": {
+        "method": "POST",
+        "path": "/api/plugins/install",
+        "multipart_field": "package",
+        "http": 201,
+        "accepted_package_version": "0.5.0",
+        "cleanup_http": 200
+      },
+      "desktop_ui": {
+        "result": "passed",
+        "method": "POST action",
+        "response_http": 200,
+        "compatibility": "upgrade_required",
+        "log": "/tmp/usage-history-luna-E6-v097-desktop-r1.log"
+      },
+      "phone_ui": {
+        "result": "passed",
+        "method": "POST action",
+        "response_http": 200,
+        "compatibility": "upgrade_required",
+        "log": "/tmp/usage-history-luna-E6-v097-phone-r1.log"
+      },
+      "api_probe_log": "/tmp/usage-history-luna-E6-v097-api-probe.log",
+      "setup_notes": [
+        "An unsupported optional workspace PATCH returned 404 before install; upgrade-only fixture bootstrap now skips only that reset.",
+        "A sparse checkout omitted tracked apps/tsconfig.json; the tracked source needed by the old web build was restored before build."
+      ],
+      "api_request": {
+        "method": "POST",
+        "path": "/api/plugins/install",
+        "multipart_field": "package",
+        "http": 201,
+        "log": "/tmp/usage-history-luna-E6-v097-api-probe.log"
+      }
+    },
+    {
+      "version": "v0.86.0",
+      "source_tag": "v0.86.0",
+      "source_commit": "50a65247dd8871e5857c0cdefb50c127c790360b",
+      "backend_binary_path": "/tmp/session-cost-e6-v086-kandev",
+      "backend_sha256": "30b2bef8a6c355e7fe7b1f0bf5674b9a0c83e0d48924d46584450d34adfe98a9",
+      "web_index_sha256": "63cf2843e0c62a83c38c8d8d52d8735f669fa55075c6eb6241e347294037009d",
+      "archive_upload": {
+        "method": "POST",
+        "path": "/api/plugins/install",
+        "multipart_field": "package",
+        "http": 201,
+        "accepted_package_version": "0.5.0",
+        "plugin_status": "active",
+        "cleanup_http": 200,
+        "result_receipt": "/tmp/usage-history-luna-E6-v086-api-probe.json",
+        "backend_log": "/tmp/session-cost-e6-v086-api-r3/backend-stdout.log"
+      },
+      "desktop_ui": {
+        "result": "passed",
+        "method": "GET legacy webhook",
+        "response_http": 200,
+        "compatibility": "upgrade_required",
+        "response_contract": "fixed body; no usage fields or target identifiers",
+        "retries": 0,
+        "log": "/tmp/usage-history-luna-E6-v086-desktop-r1.log",
+        "command": "env -u CAPTURE_PR_ASSETS NODE_OPTIONS=--import=tsx GOMAXPROCS=1 E2E_PORT_OFFSET=27 KANDEV_HOST_ROOT=/tmp/session-cost-host-v086-e6 KANDEV_E2E_BIN=/tmp/session-cost-host-v086-e6/apps/backend/bin/kandev SESSION_COST_PACKAGE_PATH=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kdlbs-kandev-plugin-session-cost/kandev-session-cost-0.5.0.tar.gz SESSION_COST_EXPECT_ACTION=0 SESSION_COST_EXPECT_UPGRADE_REQUIRED=1 KANDEV_E2E_WS_ASSERT=1 PATH=/tmp/session-cost-e6-v086-bin:$PATH pnpm run e2e:run --host --no-build --shards 1 --project chromium -- --config=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kdlbs-kandev-plugin-session-cost/test/host-action-smoke.playwright.config.mjs --grep='returns upgrade_required before source access on an older Host' --workers=1 --retries=0 --output=/tmp/usage-history-luna-E6-v086-desktop-r1-output",
+        "cwd": "/tmp/session-cost-host-v086-e6/apps/web"
+      },
+      "phone_ui": "not run",
+      "build_commands": [
+        "GOFLAGS=-p=1 CGO_ENABLED=1 go build -tags fts5 -ldflags '-s -w -X main.Version=v0.86.0 -X main.Commit=50a65247dd8871e5857c0cdefb50c127c790360b' -o /tmp/session-cost-e6-v086-kandev ./cmd/kandev",
+        "make -C apps/backend build-agentctl BUILD_DIR=/tmp/session-cost-e6-v086-bin GOFLAGS=-p=1",
+        "pnpm install --frozen-lockfile --ignore-scripts",
+        "pnpm --filter @kandev/web build:e2e",
+        "GOFLAGS=-p=1 CGO_ENABLED=1 go build -tags fts5 -ldflags '-s -w -X main.Version=v0.86.0 -X main.Commit=50a65247dd8871e5857c0cdefb50c127c790360b' -o apps/backend/bin/kandev ./cmd/kandev",
+        "make build-mock-agent e2e-plugin-package GOFLAGS=-p=1"
+      ],
+      "web_install_exit": 0,
+      "web_build_exit": 0,
+      "fixture_build_exit": 0,
+      "api_result_receipt": "/tmp/usage-history-luna-E6-v086-api-probe.json",
+      "ui_build_log": "/tmp/usage-history-luna-E6-v086-web-build.log",
+      "ui_build_exit_file": "/tmp/usage-history-luna-E6-v086-web-build.exit",
+      "fixture_build_log": "/tmp/usage-history-luna-E6-v086-fixtures-build.log",
+      "ui_log": "/tmp/usage-history-luna-E6-v086-desktop-r1.log",
+      "ui_exit_file": "/tmp/usage-history-luna-E6-v086-desktop-r1.exit",
+      "setup_attempts": [
+        "First backend attempt failed before API upload because agentctl was not on PATH; exact-tag helper was built.",
+        "Second backend attempt polled unsupported /ready and saw 503; retry used tagged /health and got 200."
+      ]
+    }
+  ],
+  "checks": {
+    "node_syntax": "passed for all changed .mjs helpers/specs",
+    "git_diff_check": "passed",
+    "package_sha256_unchanged": true,
+    "full_go_and_68_node_suites": "not repeated; plugin production source/package unchanged from E5",
+    "B7_assets": {
+      "backup": "/tmp/usage-history-B7-merged-assets",
+      "current": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web/.pr-assets",
+      "files_each": 7,
+      "byte_for_byte_match": true
+    },
+    "current_core_build_artifacts_match_parent_receipt": true,
+    "v086_tracked_source_tree_clean_after_build": true,
+    "plugin_staged_or_committed": false,
+    "owned_listener_cleanup": "passed; E6 offset 27 backend/agentctl listeners and processes exited; no unrelated process was terminated"
+  },
+  "changed_files": [
+    "README.md",
+    "docs/plans/token-usage/plan.md",
+    "test/host-action-smoke.spec.mjs",
+    "test/mobile-session-cost-action-smoke.spec.mjs",
+    "test/retained-usage-auth-smoke-helper.mjs",
+    "test/retained-usage-smoke-helper.mjs",
+    "test/retained-usage-state-inspection.mjs",
+    "test/host-test-fixtures.mjs"
+  ],
+  "blockers": [],
+  "limitations": [
+    "No minimum Kandev release floor is claimed.",
+    "Neither v0.97 nor v0.86 retained-usage support was tested; both older browser paths intentionally return upgrade_required.",
+    "v0.86 phone UI route was not run.",
+    "The current Tokscale source report was empty; import completion and missing-target diagnostics passed, but no source record import is claimed.",
+    "Parent review and public CI remain pending; no commit, push, or public comment was made."
+  ],
+  "build_request": null,
+  "evidence_documentation": [
+    "README.md E6 status section",
+    "docs/plans/token-usage/plan.md E6 validation section"
+  ],
+  "created_receipts": [
+    "/tmp/usage-history-luna-E6-v086-api-probe.json",
+    "/tmp/usage-history-luna-E6-ready.json"
+  ],
+  "secrets_or_fixture_ids_recorded": false,
+  "parent_corrections": {
+    "archive_hash": "Corrected one missing hexadecimal digit in the worker transcription; independently hashed the unchanged archive.",
+    "core_source_commit": "98580f996c3867c7db9e87fabc0c321c4f1586e9",
+    "actual_tested_host_build_commit": "68244c2fbd9df85917749eb3d7218ebcde3e93d1",
+    "state_inspection_tests": "Seven affected Node tests passed; none failed or skipped.",
+    "evidence_limit": "Empty Tokscale report verifies import status and missing targets; no successful nonempty CLI import is claimed."
+  }
+}

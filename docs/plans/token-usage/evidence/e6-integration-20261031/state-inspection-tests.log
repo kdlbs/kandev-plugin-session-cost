@@ -1,0 +1,15 @@
+✔ inspects allowlisted checkpoints without treating scheduling counts as usage amounts (50.957923ms)
+✔ accepts the authenticated smoke's explicit canonical database filename (15.291782ms)
+✔ rejects accounting payload fields by schema, regardless of their numeric values (20.758784ms)
+✔ rejects prompt and title fields without printing checkpoint JSON (33.345878ms)
+✔ rejects supplied private markers in otherwise allowed string fields (14.083346ms)
+✔ rejects unsafe roots, filenames, symlinks, and requests for writable access (11.649983ms)
+✔ refuses plugin-state records outside the approved checkpoint key policy (19.491518ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 220.611618

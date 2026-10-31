@@ -14,26 +14,83 @@ const hostRoot =
 const requireFromHost = createRequire(path.join(hostRoot, "apps/web/package.json"));
 const { expect } = requireFromHost("@playwright/test");
 const pluginId = "kandev-session-cost";
-const retainedPrivateValues = [
+const retainedPrivateValues = new Set([
   "Private retained task",
   "retained-private-model",
   "private-provider",
-].filter((value) => typeof value === "string" && value.trim().length > 0);
+].filter((value) => typeof value === "string" && value.trim().length > 0));
 
 async function hostModule(relativePath) {
   return import(pathToFileURL(path.join(hostRoot, relativePath)).href);
+}
+
+async function createNativeUsage(page, workspaceId, usage, SessionPage) {
+  const agentsResponse = await page.request.get("/api/v1/agents");
+  expect(agentsResponse.status(), await agentsResponse.text()).toBe(200);
+  const { agents } = await agentsResponse.json();
+  const agentProfileId = agents
+    .filter((agent) => agent.id !== "dynamic")
+    .flatMap((agent) => agent.profiles ?? [])
+    .find((profile) => profile.enabled !== false)?.id;
+  if (!agentProfileId) throw new Error("Authenticated native usage fixture has no enabled agent profile");
+
+  const response = await page.request.post(`/api/v1/workspaces/${workspaceId}/quick-chat`, {
+    data: { title: "Private native usage", agent_profile_id: agentProfileId },
+  });
+  expect(response.status(), await response.text()).toBe(200);
+  const chat = await response.json();
+  const settingsResponse = await page.request.patch("/api/v1/user/settings", {
+    data: { workspace_id: workspaceId },
+  });
+  expect(settingsResponse.status(), await settingsResponse.text()).toBe(200);
+
+  await page.goto(`/t/${chat.task_id}`);
+  const sessionPage = new SessionPage(page);
+  await sessionPage.waitForLoad();
+  await sessionPage.sendMessageViaButton("/slow 1s /with-usage");
+  await expect(
+    sessionPage.chat.getByText("Slow response complete after 1s.", { exact: false }),
+  ).toBeVisible({ timeout: 60_000 });
+
+  const nativeUsage = await usage.waitForUsage(page, workspaceId, "150", {
+    group: "session",
+    task_id: chat.task_id,
+    session_id: chat.session_id,
+  });
+  expect(nativeUsage.totals.token_source?.source).toBe("native");
+
+  const canonical = await usage.usageFixture(page, workspaceId, {
+    operation: "canonical",
+    filter: { TaskIDs: [chat.task_id], SessionIDs: [chat.session_id] },
+    page: { Limit: 200 },
+  });
+  expect(canonical.rows).toHaveLength(1);
+  const native = canonical.rows[0];
+  expect(native.TotalTokens).toBe(150);
+  expect(native.SourceRecordID).toBeTruthy();
+  expect(native.Model).toBeTruthy();
+  expect(typeof native.Provider).toBe("string");
+  expect(native.ObservedAt).toBeTruthy();
+  for (const value of [native.Model, native.Provider]) {
+    if (typeof value === "string" && value.trim().length > 0) retainedPrivateValues.add(value);
+  }
+
+  const target = await usage.usageTarget(page, workspaceId, chat.task_id, chat.session_id);
+  return { ...chat, target, native };
 }
 
 export async function runSessionCostAuthenticatedRetentionSmoke({ backend, browser }) {
   const packagePath = process.env.SESSION_COST_PACKAGE_PATH;
   if (!packagePath) throw new Error("Retained auth smoke requires SESSION_COST_PACKAGE_PATH.");
 
-  const [auth, fixturePlugin, usage, authUsage] = await Promise.all([
+  const [auth, fixturePlugin, usage, authUsage, sessionPageModule] = await Promise.all([
     hostModule("apps/web/e2e/helpers/auth.ts"),
     hostModule("apps/web/e2e/helpers/plugin-fixture.ts"),
     hostModule("apps/web/e2e/helpers/usage-history.ts"),
     hostModule("apps/web/e2e/helpers/usage-history-auth.ts"),
+    hostModule("apps/web/e2e/pages/session-page.ts"),
   ]);
+  const { SessionPage } = sessionPageModule;
 
   await backend.restart({
     KANDEV_FEATURES_AUTH: "true",
@@ -81,7 +138,7 @@ export async function runSessionCostAuthenticatedRetentionSmoke({ backend, brows
       tmpDir: backend.tmpDir,
       databaseFilename: SESSION_COST_AUTH_DATABASE,
       readOnly: true,
-      forbiddenValues: retainedPrivateValues,
+      forbiddenValues: [...retainedPrivateValues],
     });
     expect(inspection.rowCount).toBeGreaterThan(0);
     expect(inspection.schemaCounts["privacy-migration-checkpoint"]).toBeGreaterThan(0);
@@ -100,15 +157,15 @@ export async function runSessionCostAuthenticatedRetentionSmoke({ backend, brows
     return fs.existsSync(marker) ? fs.readFileSync(marker, "utf8") : null;
   };
 
-  const reportCost = async (page, workspaceId, target, itemId) => {
+  const reportCost = async (page, workspaceId, target, native, itemId) => {
     await usage.reportFixtureUsage(page, workspaceId, {
       subject_binding: target.SubjectBinding,
       item_id: itemId,
       revision: 2,
-      model_id: "retained-private-model",
-      provider: "private-provider",
-      work_identity: { Scheme: "provider_event", ID: randomUUID() },
-      coverage: { OccurrenceAt: new Date().toISOString() },
+      model_id: native.Model,
+      ...(native.Provider && { provider: native.Provider }),
+      work_identity: { Scheme: "provider_event", ID: native.SourceRecordID },
+      coverage: { OccurrenceAt: native.ObservedAt },
       cost: { amount: "1200", currency: "USD", basis: "reported" },
       quality: { TokenCoverageComplete: false, CostCoverageComplete: true },
     });
@@ -138,29 +195,36 @@ export async function runSessionCostAuthenticatedRetentionSmoke({ backend, brows
 
     await usage.waitForUsage(alpha.page, alpha.workspace, "31");
     await usage.waitForUsage(beta.page, beta.workspace, "47");
+    const alphaNative = await createNativeUsage(alpha.page, alpha.workspace, usage, SessionPage);
+    const expectedAlphaTokens = "181";
+    await usage.waitForUsage(alpha.page, alpha.workspace, expectedAlphaTokens);
     expect(
       (await usage.readUsage(alpha.page, alpha.workspace)).totals.amounts_decimal?.total_tokens,
-    ).toBe("31");
+    ).toBe(expectedAlphaTokens);
     expect(
       (await usage.readUsage(beta.page, beta.workspace)).totals.amounts_decimal?.total_tokens,
     ).toBe("47");
 
-    const alphaTarget = await usage.usageTarget(alpha.page, alpha.workspace, alpha.task);
-    expect(alphaTarget.SessionID).toBeTruthy();
-    await reportCost(alpha.page, alpha.workspace, alphaTarget, `auth-cost-${suffix}`);
+    const alphaTarget = alphaNative.target;
+    await reportCost(alpha.page, alpha.workspace, alphaTarget, alphaNative.native, `auth-cost-${suffix}`);
 
-    let alphaUsage;
+    let alphaNativeUsage;
     await expect.poll(async () => {
-      alphaUsage = await usage.readUsage(alpha.page, alpha.workspace);
-      return alphaUsage.totals.amounts_decimal?.cost_subcents;
+      alphaNativeUsage = await usage.readUsage(alpha.page, alpha.workspace, {
+        task_id: alphaNative.task_id,
+        session_id: alphaTarget.SessionID,
+      });
+      return alphaNativeUsage.totals.amounts_decimal?.cost_subcents;
     }, {
       timeout: 30_000,
-      message: "The authenticated public stats API must expose the accepted Host reported cost",
+      message: "The authenticated task stats API must expose the exact native event's accepted Host reported cost",
     }).toBe("1200");
+    expect(alphaNativeUsage.totals.amounts_decimal?.total_tokens).toBe("150");
+    expect(alphaNativeUsage.totals.token_source?.source).toBe("native");
     const alphaAction = await sessionCostAction(
       alpha.page,
       alpha.workspace,
-      alpha.task,
+      alphaNative.task_id,
       alphaTarget.SessionID,
     );
     expect(alphaAction.status(), await alphaAction.text()).toBe(200);
@@ -186,16 +250,28 @@ export async function runSessionCostAuthenticatedRetentionSmoke({ backend, brows
     const betaForeignAction = await sessionCostAction(
       beta.page,
       alpha.workspace,
-      alpha.task,
+      alphaNative.task_id,
       alphaTarget.SessionID,
     );
     expect(betaForeignAction.status(), await betaForeignAction.text()).toBe(404);
 
-    const alphaCanonicalBeforeLegacy = {
-      total_tokens: alphaUsage.totals.amounts_decimal?.total_tokens,
-      cost_subcents: alphaUsage.totals.amounts_decimal?.cost_subcents,
+    const alphaWorkspaceUsage = await usage.readUsage(alpha.page, alpha.workspace);
+    const alphaWorkspaceBeforeLegacy = {
+      total_tokens: alphaWorkspaceUsage.totals.amounts_decimal?.total_tokens,
+      cost_subcents: alphaWorkspaceUsage.totals.amounts_decimal?.cost_subcents,
     };
-    expect(alphaCanonicalBeforeLegacy).toEqual({ total_tokens: "31", cost_subcents: "1200" });
+    expect(alphaWorkspaceBeforeLegacy).toEqual({
+      total_tokens: expectedAlphaTokens,
+      cost_subcents: null,
+    });
+    const alphaCanonicalBeforeLegacy = {
+      total_tokens: alphaNativeUsage.totals.amounts_decimal?.total_tokens,
+      cost_subcents: alphaNativeUsage.totals.amounts_decimal?.cost_subcents,
+    };
+    expect(alphaCanonicalBeforeLegacy).toEqual({
+      total_tokens: "150",
+      cost_subcents: "1200",
+    });
     const alphaActionSnapshot = (payload) => ({
       found: payload.found,
       saved: payload.saved,
@@ -209,7 +285,7 @@ export async function runSessionCostAuthenticatedRetentionSmoke({ backend, brows
     const alphaActionBeforeLegacy = alphaActionSnapshot(alphaSaved);
 
     const legacyQuery = new URLSearchParams({
-      task_id: alpha.task,
+      task_id: alphaNative.task_id,
       active: alphaTarget.SessionID,
     });
     const legacyWebhookPath = `/api/plugins/${pluginId}/webhooks/session-cost?${legacyQuery}`;
@@ -218,13 +294,20 @@ export async function runSessionCostAuthenticatedRetentionSmoke({ backend, brows
     const sourceRunsBeforeLegacy = fixtureRunCount();
     const anonymousLegacy = await anonymousContext.request.get(legacyWebhookPath);
     expect(anonymousLegacy.status(), "anonymous legacy webhook request must require authentication").toBe(401);
-    const betaLegacy = await beta.page.request.get(legacyWebhookPath);
-    expect(betaLegacy.status(), "authenticated foreign legacy request must return upgrade guidance").toBe(200);
-    const alphaLegacy = await alpha.page.request.get(legacyWebhookPath);
-    expect(alphaLegacy.status(), "authenticated owner legacy request must return upgrade guidance").toBe(200);
+    const sameOriginLegacyRequest = async (page) => {
+      await page.goto("/");
+      return page.evaluate(async (requestPath) => {
+        const response = await fetch(requestPath, { credentials: "same-origin" });
+        return { status: response.status, body: await response.text() };
+      }, legacyWebhookPath);
+    };
+    const betaLegacy = await sameOriginLegacyRequest(beta.page);
+    expect(betaLegacy.status, "authenticated foreign legacy request must return fixed guidance").toBe(200);
+    const alphaLegacy = await sameOriginLegacyRequest(alpha.page);
+    expect(alphaLegacy.status, "authenticated owner legacy request must return upgrade guidance").toBe(200);
 
-    const betaLegacyPayload = await betaLegacy.json();
-    const alphaLegacyPayload = await alphaLegacy.json();
+    const betaLegacyPayload = JSON.parse(betaLegacy.body);
+    const alphaLegacyPayload = JSON.parse(alphaLegacy.body);
     const expectedLegacyPayload = {
       compatibility: "upgrade_required",
       error: "Use the authenticated session-usage action to view or refresh usage.",
@@ -256,11 +339,19 @@ export async function runSessionCostAuthenticatedRetentionSmoke({ backend, brows
     expect({
       total_tokens: alphaUsageAfterLegacy.totals.amounts_decimal?.total_tokens,
       cost_subcents: alphaUsageAfterLegacy.totals.amounts_decimal?.cost_subcents,
+    }).toEqual(alphaWorkspaceBeforeLegacy);
+    const alphaNativeUsageAfterLegacy = await usage.readUsage(alpha.page, alpha.workspace, {
+      task_id: alphaNative.task_id,
+      session_id: alphaTarget.SessionID,
+    });
+    expect({
+      total_tokens: alphaNativeUsageAfterLegacy.totals.amounts_decimal?.total_tokens,
+      cost_subcents: alphaNativeUsageAfterLegacy.totals.amounts_decimal?.cost_subcents,
     }).toEqual(alphaCanonicalBeforeLegacy);
     const alphaActionAfterLegacyResponse = await sessionCostAction(
       alpha.page,
       alpha.workspace,
-      alpha.task,
+      alphaNative.task_id,
       alphaTarget.SessionID,
     );
     expect(alphaActionAfterLegacyResponse.status()).toBe(200);
@@ -282,16 +373,19 @@ export async function runSessionCostAuthenticatedRetentionSmoke({ backend, brows
     expect(forgedBinding.Results[0].Status).toBe("rejected");
 
     const transferred = await authUsage.seedAuthenticatedUsage(alpha.page, "53");
-    const transferredTarget = await usage.usageTarget(
+    const transferredNative = await createNativeUsage(
       alpha.page,
       transferred.workspace,
-      transferred.task,
+      usage,
+      SessionPage,
     );
+    const transferredTarget = transferredNative.target;
     expect(transferredTarget.SessionID).toBeTruthy();
     await reportCost(
       alpha.page,
       transferred.workspace,
       transferredTarget,
+      transferredNative.native,
       `transferred-cost-${suffix}`,
     );
     let beforeTransferAction;
@@ -299,7 +393,7 @@ export async function runSessionCostAuthenticatedRetentionSmoke({ backend, brows
       const response = await sessionCostAction(
         alpha.page,
         transferred.workspace,
-        transferred.task,
+        transferredNative.task_id,
         transferredTarget.SessionID,
       );
       expect(response.status()).toBe(200);
@@ -348,7 +442,7 @@ export async function runSessionCostAuthenticatedRetentionSmoke({ backend, brows
     const newOwnerAction = await sessionCostAction(
       beta.page,
       transferred.workspace,
-      transferred.task,
+      transferredNative.task_id,
       transferredTarget.SessionID,
     );
     expect([200, 404]).toContain(newOwnerAction.status());

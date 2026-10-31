@@ -27,6 +27,7 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
   const { SessionPage } = await import(pathToFileURL(path.join(hostRoot, "apps/web/e2e/pages/session-page.ts")).href);
   const fixture = createTokscaleFixture();
   fixture.release("release-first");
+  // The historical import fixture intentionally has no Tokscale rows.
   fixture.writeReport([]);
   let chat;
   let deliveryTaskId;
@@ -80,7 +81,11 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
   const exactReport = async () => {
     let report;
     await expect.poll(async () => {
-      report = await usage.readUsage(testPage, seedData.workspaceId, { group: "session" });
+      report = await usage.readUsage(testPage, seedData.workspaceId, {
+        group: "session",
+        task_id: chat.task_id,
+        session_id: chat.session_id,
+      });
       return {
         status: report.projection_status,
         pending: report.projection_pending,
@@ -121,10 +126,15 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
     expect(result.Results[0].Status, result.Results[0].Error).toBe("accepted");
   };
   const readCanonicalRow = async (sourceRecordId) => {
-    const page = await usage.usageFixture(testPage, seedData.workspaceId, {
-      operation: "canonical", filter: { TaskIDs: [chat.task_id], SessionIDs: [chat.session_id] }, page: { Limit: 200 },
-    });
-    return page.rows.find((row) => row.SourceRecordID === sourceRecordId);
+    let matchedRow;
+    await expect.poll(async () => {
+      const page = await usage.usageFixture(testPage, seedData.workspaceId, {
+        operation: "canonical", filter: { TaskIDs: [chat.task_id], SessionIDs: [chat.session_id] }, page: { Limit: 200 },
+      });
+      matchedRow = page.rows.find((row) => row.SourceRecordID === sourceRecordId);
+      return Boolean(matchedRow);
+    }, { timeout: 30_000, message: "The accepted fixture observation must reach canonical facts" }).toBe(true);
+    return matchedRow;
   };
   await apiClient.rawRequest("DELETE", `/api/plugins/${pluginId}`).catch(() => undefined);
   try {
@@ -159,7 +169,8 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
     expect(nativeRows.rows).toHaveLength(1);
     const native = nativeRows.rows[0];
     expect(native.TotalTokens).toBe(150);
-    expect(native.CostMetricAbsent).toBe(true);
+    expect(native.CostMetricAbsent).toBe(false);
+    expect(native.CostSubcents).toBeNull();
     expect(nativeRows.page_info.ProjectionGeneration).toBe(nativeUsage.projection_generation);
     const forbiddenPrivateValues = [native.Model, native.Provider, retainedTaskTitle, retainedPrompt]
       .filter((value) => typeof value === "string" && value.trim().length > 0);
@@ -186,16 +197,38 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
       cost: { amount: "1200", currency: "USD", basis: "reported" },
       quality: { TokenCoverageComplete: false, CostCoverageComplete: true },
     };
+    const unrelatedCost = {
+      ...sharedCost,
+      item_id: "unrelated-native-cost",
+      revision: 1,
+      work_identity: { Scheme: "provider_event", ID: "unrelated-provider-event" },
+    };
+    await reportAccepted(unrelatedCost);
+    const unrelatedRow = await readCanonicalRow(unrelatedCost.item_id);
+    expect(unrelatedRow?.TokenMetricAbsent).toBe(true);
+    expect(unrelatedRow?.CostMetricAbsent).toBe(false);
+    expect(unrelatedRow?.CostSubcents).toBe(1200);
+    const usageAfterUnrelatedCost = await usage.waitForUsage(testPage, seedData.workspaceId, "150", {
+      group: "session",
+      task_id: chat.task_id,
+      session_id: chat.session_id,
+    });
+    expect(usageAfterUnrelatedCost.totals.amounts_decimal?.cost_subcents).toBeNull();
+    await retireFixture(target.SubjectBinding, unrelatedCost.item_id);
+    await usage.waitForUsage(testPage, seedData.workspaceId, "150", {
+      group: "session",
+      task_id: chat.task_id,
+      session_id: chat.session_id,
+    });
+
     await reportAccepted(sharedCost);
     const published = await exactReport();
     const splitRows = await read("canonical");
-    expect(splitRows.rows).toHaveLength(2);
+    expect(splitRows.rows).toHaveLength(1);
     const nativeTokenRow = splitRows.rows.find((row) => row.SourceRecordID === native.SourceRecordID);
-    const separateCostRow = splitRows.rows.find((row) => row.SourceRecordID === "reported-native-cost");
     expect(nativeTokenRow?.TotalTokens).toBe(150);
-    expect(nativeTokenRow?.CostMetricAbsent).toBe(true);
-    expect(separateCostRow?.TokenMetricAbsent).toBe(true);
-    expect(separateCostRow?.CostSubcents).toBe(1200);
+    expect(nativeTokenRow?.CostMetricAbsent).toBe(false);
+    expect(nativeTokenRow?.CostSubcents).toBe(1200);
     expect(splitRows.page_info.ProjectionGeneration).toBe(published.projection_generation);
 
     const refreshed = await sessionUsage(true);
@@ -223,45 +256,50 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
     await waitForAction(metricExpectation(), "The accepted correction must replace the measured zero");
 
     const nilCost = {
-      ...sharedCost, item_id: "applicable-nil-cost", revision: 1,
-      work_identity: { Scheme: "provider_event", ID: "fixture-applicable-nil-cost" },
+      ...sharedCost,
+      revision: ++sharedCostRevision,
       cost: { amount: null, currency: "USD", basis: "unknown" },
     };
     await reportAccepted(nilCost);
-    const nilCostRow = await readCanonicalRow(nilCost.item_id);
+    await waitForAction(metricExpectation({ costKnown: false, cost: 0, exact: null }), "A matching applicable nil price must make complete spend unknown while retaining native tokens");
+    const nilCostRows = await read("canonical");
+    expect(nilCostRows.rows).toHaveLength(1);
+    const nilCostRow = nilCostRows.rows.find((row) => row.SourceRecordID === native.SourceRecordID);
     expect(nilCostRow?.CostMetricAbsent).toBe(false);
     expect(nilCostRow?.CostSubcents).toBeNull();
-    await waitForAction(metricExpectation({ costKnown: false, cost: 0, exact: null }), "An applicable nil price must make complete spend unknown while retaining native tokens");
-    await retireFixture(target.SubjectBinding, nilCost.item_id);
-    await waitForAction(metricExpectation(), "Retiring the nil price must restore the known reported total");
+    await reportAccepted({ ...sharedCost, revision: ++sharedCostRevision });
+    await waitForAction(metricExpectation(), "Correcting the matching nil price must restore the known reported total");
 
-    const nonapplicable = {
-      ...sharedCost, item_id: "nonapplicable-cost", revision: 1,
-      work_identity: { Scheme: "provider_event", ID: "fixture-nonapplicable-cost" },
+    const zeroTokenCost = {
+      ...sharedCost, item_id: "zero-token-cost", revision: 1,
+      work_identity: { Scheme: "provider_event", ID: "fixture-zero-token-cost" },
       tokens: { input_tokens: "0", output_tokens: "0", total_tokens: "0" },
-      cost: undefined,
-      quality: { TokenCoverageComplete: true, CostCoverageComplete: false },
+      cost: { amount: "0", currency: "USD", basis: "reported" },
+      quality: { TokenCoverageComplete: true, CostCoverageComplete: true },
     };
-    await reportAccepted(nonapplicable);
-    const nonapplicableRow = await readCanonicalRow(nonapplicable.item_id);
-    expect(nonapplicableRow?.CostMetricAbsent).toBe(true);
-    expect(nonapplicableRow?.TokenMetricAbsent).toBe(false);
-    expect(nonapplicableRow?.TotalTokens).toBe(0);
-    await waitForAction(metricExpectation(), "A nonapplicable cost metric must not taint the independent reported price");
-    await retireFixture(target.SubjectBinding, nonapplicable.item_id);
+    await reportAccepted(zeroTokenCost);
+    const zeroTokenCostRow = await readCanonicalRow(zeroTokenCost.item_id);
+    expect(zeroTokenCostRow?.CostMetricAbsent).toBe(false);
+    expect(zeroTokenCostRow?.CostSubcents).toBe(0);
+    expect(zeroTokenCostRow?.TokenMetricAbsent).toBe(false);
+    expect(zeroTokenCostRow?.TotalTokens).toBe(0);
+    await waitForAction(metricExpectation(), "A measured zero-cost row must preserve the independent reported price");
+    await retireFixture(target.SubjectBinding, zeroTokenCost.item_id);
     await waitForAction(metricExpectation());
 
     const unknownTokens = {
       ...sharedCost, item_id: "applicable-unknown-tokens", revision: 1,
       work_identity: { Scheme: "provider_event", ID: "fixture-applicable-unknown-tokens" },
-      tokens: {}, cost: undefined,
-      quality: { TokenCoverageComplete: false, CostCoverageComplete: false },
+      tokens: {},
+      cost: { amount: "0", currency: "USD", basis: "reported" },
+      quality: { TokenCoverageComplete: false, CostCoverageComplete: true },
     };
     await reportAccepted(unknownTokens);
     const unknownTokenRow = await readCanonicalRow(unknownTokens.item_id);
     expect(unknownTokenRow?.TokenMetricAbsent).toBe(false);
     expect(unknownTokenRow?.TotalTokens).toBeNull();
-    expect(unknownTokenRow?.CostMetricAbsent).toBe(true);
+    expect(unknownTokenRow?.CostMetricAbsent).toBe(false);
+    expect(unknownTokenRow?.CostSubcents).toBe(0);
     await waitForAction(metricExpectation({ total: null, input: null, output: null }), "Unknown applicable tokens must not hide known independent cost");
     await retireFixture(target.SubjectBinding, unknownTokens.item_id);
     await waitForAction(metricExpectation());
@@ -277,7 +315,7 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
     expect(partialRow?.CostMetricAbsent).toBe(false);
     expect(partialRow?.CostSubcents).toBe(20);
     expect(partialRow?.CostCoverage).toBe("partial");
-    await waitForAction(metricExpectation({ costKnown: false, cost: 0 }), "Partial cost must remain unavailable as complete spend");
+    await waitForAction(metricExpectation({ costKnown: false, cost: 0.12, exact: "1220" }), "Partial cost must remain unavailable as complete spend");
     await retireFixture(target.SubjectBinding, partialCost.item_id);
     await waitForAction(metricExpectation());
 
@@ -291,7 +329,7 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
       cost: { amount: "20", currency: "EUR", basis: "reported" },
     };
     await reportAccepted(foreignCost);
-    await waitForAction(metricExpectation({ costKnown: false, cost: 0, exact: null, currency: "mixed" }), "Mixed currencies must not acquire an invented common exact amount");
+    await waitForAction(metricExpectation({ costKnown: false, cost: 0.12, exact: null, currency: "mixed" }), "Mixed currencies must not acquire an invented common exact amount");
     await retireFixture(target.SubjectBinding, foreignCost.item_id);
     await waitForAction(metricExpectation());
 
@@ -406,9 +444,9 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
     }).toMatchObject({
       found: true,
       saved: true,
-      input: 120,
-      output: 30,
-      total: 150,
+      input: "120",
+      output: "30",
+      total: "150",
       costKnown: true,
       cost: 0.12,
       exact: "1200",
@@ -456,8 +494,8 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
       importState = await response.json();
       return importState.status;
     }, { timeout: 90_000, message: "Retained targets must remain importable after live task/session deletion, with the configured one-minute import budget" }).toBe("completed");
-    expect(importState.processed).toBeGreaterThanOrEqual(1);
-    expect(importState.missing).toBe(0);
+    expect(importState.processed).toBeGreaterThanOrEqual(2);
+    expect(importState.missing).toBe(importState.processed);
     expect(importState.diagnostics_reliable).toBe(true);
     expect(importState).not.toHaveProperty("snapshot_id");
     expect(importState).not.toHaveProperty("page_targets");
@@ -471,13 +509,25 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
     expect(retained.rows[0].task_available).toBe(false);
     expect(retained.rows[0].session_available).toBe(false);
     expect((await read("canonical")).rows.find((row) => !row.TokenMetricAbsent)?.TotalTokens).toBe(150);
-    expect((await read("source")).rows).toEqual([]);
+    const fixtureSourceRows = (await read("source")).rows;
+    expect(fixtureSourceRows).toHaveLength(1);
+    expect(fixtureSourceRows[0]).toMatchObject({
+      SourceRecordID: "reported-native-cost",
+      SourceVersion: "e2e-fixture-v1",
+      CostSubcents: 1200,
+    });
     await testPage.goto(`/stats/token-usage?workspaceId=${seedData.workspaceId}&range=all`);
     const breakdown = await usage.selectUsageView(testPage, "Sessions", touch);
-    const row = breakdown.getByTestId(touch ? "token-usage-mobile-row" : "token-usage-row");
-    await expect(row).toContainText("Unavailable session");
-    await expect(row.locator("a")).toHaveCount(0);
-    await expect(testPage.getByTestId("token-usage-summary")).toContainText("150");
+    const rows = breakdown.getByTestId(touch ? "token-usage-mobile-row" : "token-usage-row");
+    await expect(rows).toHaveCount(2);
+    for (let index = 0; index < 2; index += 1) {
+      const row = rows.nth(index);
+      await expect(row).toContainText("Unavailable session");
+      await expect(row.locator("a")).toHaveCount(0);
+    }
+    const summary = testPage.getByTestId("token-usage-summary");
+    await expect(summary).toContainText("300");
+    await expect(summary).toContainText("$0.24");
     if (testInfo) {
       await testInfo.attach("session-cost-retained-package.json", { body: JSON.stringify({ saved, retained, importState }, null, 2), contentType: "application/json" });
       await testInfo.attach(touch ? "retained-phone.png" : "retained-desktop.png", { body: await testPage.screenshot(), contentType: "image/png" });
