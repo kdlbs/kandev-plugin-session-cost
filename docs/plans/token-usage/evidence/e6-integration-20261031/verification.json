@@ -1,0 +1,134 @@
+{
+  "scope": "historical-only",
+  "date": "2026-10-31",
+  "purpose": "Record the E6 package and installed-Host checks without treating them as current-head evidence.",
+  "plugin_source_commit": "1eb3bb1f944820150636cbeef66365f2994004b9",
+  "sdk_pin": "9a751dd7d88a12307ee3a23130651cb6a0b8f2d3",
+  "package": {
+    "name": "kandev-session-cost-0.5.0.tar.gz",
+    "sha256": "b53001dc639cddb36c757e798f7c492ec3b2c8fc7543fc73bddf3be35bfb1a9e",
+    "rebuilt_for_e6": false,
+    "note": "The archive was the previously verified package for source commit 1eb3bb1f. E6 did not rebuild it."
+  },
+  "host_validation": {
+    "current_host": {
+      "version": "v0.98.0-264",
+      "source_commit": "68244c2fbd9df85917749eb3d7218ebcde3e93d1",
+      "desktop": [
+        "composer action passed",
+        "authenticated access and privacy passed",
+        "retained usage lifecycle passed in a separate run"
+      ],
+      "phone": [
+        "composer action passed",
+        "retained usage lifecycle passed"
+      ]
+    },
+    "older_hosts": [
+      {
+        "version": "v0.97.0",
+        "source_commit": "e43881c7555372897b57ec51c705f1e05da43c40",
+        "archive_upload": 201,
+        "tested_action": "upgrade_required"
+      },
+      {
+        "version": "v0.86.0",
+        "source_commit": "50a65247dd8871e5857c0cdefb50c127c790360b",
+        "archive_upload": 201,
+        "tested_action": "upgrade_required",
+        "phone_ui_run": false
+      }
+    ]
+  },
+  "r7_attempt_note": "Playwright retries were disabled. The first desktop retention run had one fixture assertion failure because the wire returned token counts as decimal strings while the fixture expected numbers. The fixture was corrected and the retention test passed in a separate r12 run; r12 was not an automatic retry.",
+  "import_coverage": "The E6 retained-usage fixture used an empty tokscale report and did not prove a successful source-data import. The separate historical-import smoke covers non-empty imports; current-head verification is recorded in E7.",
+  "limitations": [
+    "Older-Host checks prove archive acceptance and tested upgrade guidance only.",
+    "No minimum Kandev version is established.",
+    "Original browser and build logs were temporary and are not included in this repository. E6 is therefore historical summary evidence, not independently reproducible log evidence."
+  ],
+  "retained_artifacts": [
+    "log-summary.json",
+    "state-inspection-tests.log",
+    "verification.json"
+  ],
+  "zero_retry_intermediate_attempts": [
+    {
+      "run": "desktop r7 initial retention attempt",
+      "result": "failed at the wire DTO assertion because the Host returned token counts as decimal strings while the fixture expected JavaScript numbers",
+      "assertion_change": "expect decimal strings from the Host DTO",
+      "automatic_retry": false,
+      "original_log_name": "usage-history-luna-E6-managed-chromium-r7.log",
+      "raw_log_retained": false
+    },
+    {
+      "run": "desktop r9 retention",
+      "result": "failed because the empty Tokscale report correctly classified both processed targets as missing",
+      "assertion_change": "assert at least two processed targets and that missing equals processed; do not claim imported records",
+      "automatic_retry": false,
+      "original_log_name": "usage-history-luna-E6-managed-chromium-r9.log",
+      "raw_log_retained": false
+    },
+    {
+      "run": "desktop r10 retention",
+      "result": "reached uninstall and found one fixture-owned source row",
+      "assertion_change": "assert the fixture-owned reported-native-cost row and its exact version and cost",
+      "automatic_retry": false,
+      "original_log_name": "usage-history-luna-E6-managed-chromium-r10.log",
+      "raw_log_retained": false
+    },
+    {
+      "run": "desktop r11 retention",
+      "result": "found two unavailable session rows because the delivery smoke creates a second task and session",
+      "assertion_change": "assert both rows and the aggregate 300 tokens and 0.24 USD",
+      "automatic_retry": false,
+      "original_log_name": "usage-history-luna-E6-managed-chromium-r11.log",
+      "raw_log_retained": false
+    },
+    {
+      "run": "phone r1 retention",
+      "result": "failed because the extra eligible target made both processed and missing counts three, not two",
+      "assertion_change": "assert missing equals processed",
+      "automatic_retry": false,
+      "original_log_name": "usage-history-luna-E6-managed-mobile-r1.log",
+      "raw_log_retained": false
+    }
+  ],
+  "older_host_evidence_note": "The original older-Host browser and build logs were temporary and were intentionally not retained. This file preserves each tested source commit, executable and web-index SHA-256, upload/result summary, and a command summary. Original log basenames are listed without claiming the files or hashes are available. There is no separate log archive.",
+  "older_hosts": [
+    {
+      "version": "v0.97.0",
+      "source_commit": "e43881c7555372897b57ec51c705f1e05da43c40",
+      "binary_sha256": "254985bbdc8a54896eca93893512445f1d1fff86006ae5afd2e9f230dd6505e5",
+      "web_index_sha256": "996ce058a2a14bae698eb3d1f05e2e5bb67ff49acec8764850aca9e03720227",
+      "archive_upload_http": 201,
+      "desktop_action": "passed; HTTP 200; upgrade_required",
+      "phone_action": "passed; HTTP 200; upgrade_required",
+      "command_summary": "Install the 0.5.0 package through POST /api/plugins/install, then run the desktop and phone Session Cost actions and verify upgrade_required.",
+      "original_log_names": [
+        "usage-history-luna-E6-v097-desktop-r1.log",
+        "usage-history-luna-E6-v097-phone-r1.log",
+        "usage-history-luna-E6-v097-api-probe.log"
+      ],
+      "raw_logs_retained": false
+    },
+    {
+      "version": "v0.86.0",
+      "source_tag": "v0.86.0",
+      "source_commit": "50a65247dd8871e5857c0cdefb50c127c790360b",
+      "backend_binary_sha256": "30b2bef8a6c355e7fe7b1f0bf5674b9a0c83e0d48924d46584450d34adfe98a9",
+      "web_index_sha256": "63cf2843e0c62a83c38c8d8d52d8735f669fa55075c6eb6241e347294037009d",
+      "archive_upload_http": 201,
+      "desktop_legacy_get": "passed; HTTP 200; upgrade_required; fixed response contains no usage values or target identifiers",
+      "phone_ui": "not run",
+      "command_summary": "Build the v0.86.0 backend and E2E web assets from the recorded source commit, install the 0.5.0 package, then run the desktop legacy GET compatibility smoke with retries disabled.",
+      "original_log_names": [
+        "usage-history-luna-E6-v086-api-probe.log",
+        "usage-history-luna-E6-v086-desktop-r1.log",
+        "usage-history-luna-E6-v086-web-build.log",
+        "usage-history-luna-E6-v086-fixtures-build.log"
+      ],
+      "raw_logs_retained": false
+    }
+  ]
+}

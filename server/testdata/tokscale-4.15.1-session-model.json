@@ -1,0 +1,7 @@
+{
+  "entries": [
+    {"client":"codex","mergedClients":null,"sessionId":"transcript-1","model":"gpt-5","provider":"openai","input":100,"output":0,"cacheRead":0,"cacheWrite":0,"reasoning":0,"messageCount":2,"cost":1.0,"performance":{}},
+    {"client":"claude","mergedClients":null,"sessionId":"transcript-1","model":"claude-sonnet-4-5","provider":"anthropic","input":200,"output":0,"cacheRead":0,"cacheWrite":0,"reasoning":0,"messageCount":3,"cost":2.0,"performance":{}}
+  ],
+  "totalInput":300,"totalOutput":0,"totalCacheRead":0,"totalCacheWrite":0,"totalMessages":5,"totalCost":3.0,"processingTimeMs":1,"warnings":[],"diagnostics":{}
+}

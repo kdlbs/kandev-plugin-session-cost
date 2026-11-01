@@ -1,0 +1,83 @@
+package main
+
+import (
+	"context"
+	"errors"
+
+	"github.com/kdlbs/kandev/pluginsdk"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+// Every raw source path must obtain current supported transcript context.
+func (p *plugin) preflightSource(ctx context.Context, workspace, task, session, transcript string, binding ...string) error {
+	_, err := p.currentSourceTarget(ctx, workspace, task, session, transcript, binding...)
+	return err
+}
+
+func (p *plugin) currentSourceTarget(ctx context.Context, workspace, task, session, transcript string, binding ...string) (pluginsdk.UsageCollectionTargetV1, error) {
+	if workspace == "" {
+		lookupCtx, cancel := p.canonicalReadContext(ctx)
+		row, err := p.Host().Tasks().Get(lookupCtx, task)
+		ctxErr := lookupCtx.Err()
+		cancel()
+		if ctxErr != nil {
+			return pluginsdk.UsageCollectionTargetV1{}, ctxErr
+		}
+		if status.Code(err) == codes.NotFound {
+			return pluginsdk.UsageCollectionTargetV1{}, errUsageSourceUnavailable
+		}
+		if err != nil {
+			return pluginsdk.UsageCollectionTargetV1{}, err
+		}
+		if row == nil {
+			return pluginsdk.UsageCollectionTargetV1{}, errUsageSourceUnavailable
+		}
+		workspace = row.WorkspaceID
+	}
+	target, err := p.resolveCurrentUsageTarget(ctx, workspace, task, session, transcript, binding...)
+	if err == nil && len(binding) > 0 && binding[0] != "" && target.SubjectBinding != binding[0] {
+		return pluginsdk.UsageCollectionTargetV1{}, errUsageScopeChanged
+	}
+	return target, err
+}
+
+// usageSourceIneligible reports whether a source error applies to one session
+// only. Any other error must stop the pass so saved work is not lost.
+func usageSourceIneligible(err error) bool {
+	return errors.Is(err, errUsageSourceUnavailable) || errors.Is(err, errUsageScopeChanged)
+}
+
+func (p *plugin) unavailableSource(saved *sessionCostResponse, session string, warn, high float64, cause ...error) *sessionCostResponse {
+	response := p.canonicalReadFailure(session, warn, high)
+	if saved != nil {
+		copy := *saved
+		response = &copy
+		response.Stale = true
+	}
+	response.ReportState = reportStateFailed
+	response.ReportError = "source_context"
+	response.Compatibility = "source_context_unavailable"
+	response.Error = "current retained source context is unavailable; saved usage remains authoritative"
+	if len(cause) > 0 && errors.Is(cause[0], errTokscaleMembership) {
+		response.ReportError = "source_membership"
+		response.Compatibility = "source_membership_ambiguous"
+		response.Error = errTokscaleMembership.Error()
+	}
+	if len(cause) > 0 && usageSourceIneligible(cause[0]) {
+		// The session itself is ineligible; it is not a Host upgrade gap.
+		response.ReportError = "source_ineligible"
+	}
+	if len(cause) > 0 && errors.Is(historyError(cause[0]), errUsageHistoryUnsupported) {
+		response.ReportError = reportErrorUnavailable
+		response.Compatibility = "upgrade_required"
+		response.Error = errUsageHistoryUnsupported.Error()
+	}
+	if len(cause) > 0 && errors.Is(cause[0], errUsageTargetsPreparing) {
+		response.ReportState = reportStatePending
+		response.ReportError = ""
+		response.Compatibility = "source_context_preparing"
+		response.Error = ""
+	}
+	return response
+}

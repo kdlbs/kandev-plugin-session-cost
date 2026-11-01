@@ -38,7 +38,7 @@ jobs:
           ref: ${{ steps.sdk.outputs.ref }}
           sparse-checkout: |
             apps/backend
-            apps/packages/plugin-sdk
+            pluginsdk
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6

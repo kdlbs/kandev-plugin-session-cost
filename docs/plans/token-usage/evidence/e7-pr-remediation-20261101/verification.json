@@ -1,0 +1,78 @@
+{
+  "scope": "current-pr-source",
+  "date": "2026-11-01",
+  "plugin_source_commit": "0cb3ee73cc68782272976af34f486bc970995616",
+  "host": {
+    "source_commit": "cc1a2cf7182d47b35d37aacc94982d4d2e9f61aa",
+    "reported_version": "v0.98.0-274-gcc1a2cf7182",
+    "binary_sha256": "db1c82ad16453e2b3b613585d3621c894bd771ce1e02bc0018a20eaea693bc43",
+    "worktree_clean_at_build": true,
+    "build_command": "make build"
+  },
+  "sdk_pin": "9a751dd7d88a12307ee3a23130651cb6a0b8f2d3",
+  "package": {
+    "name": "kandev-session-cost-0.5.0.tar.gz",
+    "platform": "linux/amd64",
+    "sha256": "5081dd2b4cbe6e2bafb2d62c2a3245276f43756f2cdc157590c3c847c064656d",
+    "manifest_file_list_and_hash_verification": "passed"
+  },
+  "local_checks": {
+    "command": "GOMAXPROCS=1 GOFLAGS='-p=1 -modfile=go.pin.mod' make check-format vet test",
+    "format": "passed",
+    "vet": "passed",
+    "go_tests": "passed",
+    "node_tests": {
+      "passed": 76,
+      "failed": 0
+    },
+    "bundle_syntax": "passed",
+    "package_verifier_tests": "passed",
+    "release_version_tests": "passed",
+    "go_mod_tidy_diff": "passed",
+    "pinned_sdk_setup_commands": [
+      "git -C ../kandev worktree add --detach ../kandev-sdk-pin \"$(cat .kandev-sdk-ref)\"",
+      "cp go.mod go.pin.mod && cp go.sum go.pin.sum",
+      "go mod edit -modfile=go.pin.mod -replace=github.com/kdlbs/kandev/pluginsdk=../kandev-sdk-pin/pluginsdk",
+      "GOMAXPROCS=1 GOFLAGS='-p=1 -modfile=go.pin.mod' make check-format vet test"
+    ],
+    "pinned_sdk_setup_from_plugin_root": true
+  },
+  "browser_smokes": [
+    {
+      "project": "chromium",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "workers": 1,
+      "duration": "2.1m"
+    },
+    {
+      "project": "mobile-chrome",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "workers": 1,
+      "duration": "1.7m"
+    }
+  ],
+  "synthetic_data": {
+    "tokscale_fixture_used": true,
+    "real_tokscale_invoked": false,
+    "historical_imported_tokens": 1620,
+    "historical_import_cost_subcents": 4200,
+    "unsafe_session_skipped": true,
+    "queued_workspace_completed_after_restart": true
+  },
+  "evidence_files": [
+    "log-summary.json",
+    "playwright-results.log",
+    "verification.json"
+  ],
+  "limitations": [
+    "Package verification covered the Linux amd64 host package only.",
+    "No minimum Host release is claimed.",
+    "The full-scale PostgreSQL and zero-FLAKY gates remain separate."
+  ]
+}
