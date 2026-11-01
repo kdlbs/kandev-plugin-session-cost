@@ -1,0 +1,25 @@
+Session Cost installed-package browser smoke
+Date: 2026-11-01
+Plugin source: 0d7fc8c91d80ea08083fc761562e4c77357f5b88
+Host source: c2abc61889481e89a204fcc9cb941abc7fa7372d
+Package SHA-256: 422556a16edaefc82881a01ae8978528b7001b8982581bf15fc9fa2bc342d2ad
+Tokscale: synthetic fixture; the real command was not invoked
+Retries: 0
+Workers: 1
+
+Chromium
+PASS (29.3s): historical import adopts and imports existing sessions, queues work, and resumes after restart
+PASS (23.9s): packaged desktop action keeps session scope and disclosure behavior
+PASS (48.5s): retained usage survives restart, archive, deletion, and uninstall
+PASS (20.8s): authenticated usage preserves bindings and attribution, then erases retained history
+Result: 4 passed, 0 failed, 0 skipped (2.1m)
+
+Mobile Chrome
+PASS (28.6s): historical import adopts and imports existing sessions, queues work, and resumes after restart
+PASS (28.6s): packaged phone action meets touch sizing and opens its details
+PASS (45.0s): retained usage survives restart, archive, deletion, and uninstall on a phone
+Result: 3 passed, 0 failed, 0 skipped (1.7m)
+
+Historical import assertions
+Imported 1,620 tokens at 4,200 cost subcents.
+An unsafe session was skipped. The second workspace completed after backend restart.

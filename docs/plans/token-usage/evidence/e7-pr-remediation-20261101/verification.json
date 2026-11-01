@@ -1,0 +1,68 @@
+{
+  "scope": "current-pr-head",
+  "date": "2026-11-01",
+  "plugin_source_commit": "0d7fc8c91d80ea08083fc761562e4c77357f5b88",
+  "host": {
+    "source_commit": "c2abc61889481e89a204fcc9cb941abc7fa7372d",
+    "reported_version": "v0.98.0-273-gc2abc618894-dirty"
+  },
+  "sdk_pin": "9a751dd7d88a12307ee3a23130651cb6a0b8f2d3",
+  "package": {
+    "name": "kandev-session-cost-0.5.0.tar.gz",
+    "platform": "linux/amd64",
+    "sha256": "422556a16edaefc82881a01ae8978528b7001b8982581bf15fc9fa2bc342d2ad",
+    "manifest_file_list_and_hash_verification": "passed"
+  },
+  "local_checks": {
+    "command": "GOMAXPROCS=1 GOFLAGS='-p=1 -modfile=go.pin.mod' make check-format vet test",
+    "format": "passed",
+    "vet": "passed",
+    "go_tests": "passed",
+    "node_tests": {
+      "passed": 75,
+      "failed": 0
+    },
+    "bundle_syntax": "passed",
+    "package_verifier_tests": "passed",
+    "release_version_tests": "passed",
+    "go_mod_tidy_diff": "passed"
+  },
+  "browser_smokes": [
+    {
+      "project": "chromium",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "workers": 1,
+      "duration": "2.1m"
+    },
+    {
+      "project": "mobile-chrome",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "retries": 0,
+      "workers": 1,
+      "duration": "1.7m"
+    }
+  ],
+  "synthetic_data": {
+    "tokscale_fixture_used": true,
+    "real_tokscale_invoked": false,
+    "historical_imported_tokens": 1620,
+    "historical_import_cost_subcents": 4200,
+    "unsafe_session_skipped": true,
+    "queued_workspace_completed_after_restart": true
+  },
+  "evidence_files": [
+    "log-summary.json",
+    "playwright-results.log",
+    "verification.json"
+  ],
+  "limitations": [
+    "Package verification covered the Linux amd64 host package only.",
+    "No minimum Host release is claimed.",
+    "The full-scale PostgreSQL and zero-FLAKY gates remain separate."
+  ]
+}

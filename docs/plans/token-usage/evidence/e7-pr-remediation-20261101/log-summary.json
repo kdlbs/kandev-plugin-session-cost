@@ -1,0 +1,41 @@
+{
+  "scope": "current-pr-head",
+  "date": "2026-11-01",
+  "plugin_source_commit": "0d7fc8c91d80ea08083fc761562e4c77357f5b88",
+  "host_source_commit": "c2abc61889481e89a204fcc9cb941abc7fa7372d",
+  "sdk_pin": "9a751dd7d88a12307ee3a23130651cb6a0b8f2d3",
+  "package_sha256": "422556a16edaefc82881a01ae8978528b7001b8982581bf15fc9fa2bc342d2ad",
+  "retry_policy": "Playwright retries were disabled. Each project used one worker.",
+  "browser_runs": [
+    {
+      "project": "chromium",
+      "result": "passed",
+      "tests": 4,
+      "duration": "2.1m",
+      "test_durations_seconds": [29.3, 23.9, 48.5, 20.8]
+    },
+    {
+      "project": "mobile-chrome",
+      "result": "passed",
+      "tests": 3,
+      "duration": "1.7m",
+      "test_durations_seconds": [28.6, 28.6, 45.0]
+    }
+  ],
+  "historical_import": {
+    "source_data": "synthetic tokscale fixture",
+    "real_tokscale_invoked": false,
+    "imported_tokens": 1620,
+    "cost_subcents": 4200,
+    "unsafe_session": "skipped",
+    "queued_workspace": "completed after backend restart"
+  },
+  "retained_output": "playwright-results.log",
+  "raw_runner_logs_retained": false,
+  "raw_log_note": "The raw runner output included temporary workspace paths and ephemeral identifiers. The retained log records sanitized test names, results, and durations.",
+  "limitations": [
+    "The package verification covered the Linux amd64 host package.",
+    "This evidence does not establish a minimum Host release.",
+    "The full-scale PostgreSQL and zero-FLAKY gates remain separate."
+  ]
+}
