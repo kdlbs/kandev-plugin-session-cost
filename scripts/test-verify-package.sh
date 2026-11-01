@@ -73,7 +73,7 @@ from pathlib import Path
 p = Path(sys.argv[1])
 s = p.read_text().replace('id: "kandev-session-cost"', 'id: kandev-session-cost')
 start = s.index('runtime:')
-end = s.index('\n# Read-only', start)
+end = s.index('\ncapabilities:', start)
 s = s[:start] + 'runtime:\n    type: binary\n    executables:\n        linux-amd64: server/plugin-linux-amd64\n' + s[end:]
 p.write_text(s)
 PYTEST

@@ -61,6 +61,10 @@ func TestReviewSourceContractOnlyExplicitEligibleAllowsRawUsage(t *testing.T) {
 					require.False(t, response.Found)
 					require.False(t, response.CostKnown)
 					require.Equal(t, "source_context_unavailable", response.Compatibility)
+				} else if path == "collector" {
+					// A per-session ineligible source is skipped in isolation; it
+					// never aborts the pass or authorizes a raw read.
+					require.NoError(t, err)
 				} else {
 					require.Error(t, err)
 				}
@@ -159,14 +163,15 @@ func TestReviewSourceContractImportPreparingNeverCertifiesEmptyMembership(t *tes
 	var view map[string]any
 	require.NoError(t, json.Unmarshal(response.Body, &view))
 	require.Equal(t, "preparing", view["status"])
-	require.Zero(t, view["processed"])
+	require.Equal(t, float64(0), view["sessions_found"])
 	state, found, err := p.loadHistoricalImportState(context.Background(), "ws")
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Empty(t, state.SnapshotID)
-	require.Empty(t, state.PageTargets)
-	require.Empty(t, state.Cursor)
+	require.Empty(t, state.Intervals)
+	require.Empty(t, state.NextDay)
 	require.Zero(t, state.SnapshotUpperBound)
+	require.Zero(t, state.SessionsFound)
 	status, err := p.handleHistoricalImportAction(context.Background(), &pluginsdk.PluginActionRequest{ActionKey: actionKeyImportStatus, Context: pluginsdk.VerifiedActionContext{WorkspaceID: "ws"}})
 	require.NoError(t, err)
 	require.Contains(t, string(status.Body), `"status":"preparing"`)
@@ -247,14 +252,16 @@ func TestReviewSourceContractUnsafeImportCannotUseLiveDatesOrTranscript(t *testi
 			}
 			var runs atomic.Int32
 			p.run = func(context.Context, string, ...string) ([]byte, error) { runs.Add(1); return nil, nil }
-			require.NoError(t, p.writeHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: 2, Status: importStatusRunning, RunID: "unsafe-run"}, true))
+			require.NoError(t, p.writeHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: importSchemaVersion, Status: importStatusRunning, RunID: "unsafe-run"}, true))
 			p.runHistoricalImport(context.Background(), "ws")
 			state, found, err := p.loadHistoricalImportState(context.Background(), "ws")
 			require.NoError(t, err)
 			require.True(t, found)
-			require.Equal(t, importStatusUnsupported, state.Status)
-			require.Zero(t, state.Processed)
-			require.Zero(t, state.Missing, "unavailable scope is not a measured missing-source result")
+			require.Equal(t, importStatusCompleted, state.Status)
+			require.Equal(t, 1, state.SessionsFound)
+			require.Equal(t, 1, state.SessionsSkipped, "an ineligible target is a skip, not a Host upgrade gap")
+			require.Zero(t, state.SessionsImported)
+			require.Zero(t, state.SessionsMissing, "unavailable scope is not a measured missing-source result")
 			require.Zero(t, runs.Load())
 		})
 	}
@@ -286,8 +293,8 @@ func TestReviewSourceContractPreparingRejectsMembershipAndHonorsCancellation(t *
 }
 
 func TestReviewSourceContractImportRestartsPreparationAndRevalidatesLegacyTarget(t *testing.T) {
-	for _, legacyPage := range []bool{false, true} {
-		t.Run(map[bool]string{false: "preparing", true: "legacy-page"}[legacyPage], func(t *testing.T) {
+	for _, preparedSnapshot := range []bool{false, true} {
+		t.Run(map[bool]string{false: "preparing", true: "prepared-snapshot"}[preparedSnapshot], func(t *testing.T) {
 			var preparations atomic.Int32
 			var reports atomic.Int32
 			p, host := historyPlugin(t, retainedProtocolFixture{list: func(_ context.Context, query pluginsdk.UsageCollectionTargetQueryV1) (pluginsdk.UsageCollectionTargetPageV1, error) {
@@ -299,13 +306,9 @@ func TestReviewSourceContractImportRestartsPreparationAndRevalidatesLegacyTarget
 				reports.Add(1)
 				return acceptedBatch(batch), nil
 			}})
-			state := historicalImportState{SchemaVersion: 2, DiagnosticsReliable: true, RunID: "restart", Status: importStatusPreparing}
-			if legacyPage {
-				target := eligibleTestTarget()
-				target.SourceScopeStatus = "" // A pre-field checkpoint must obtain new authority.
+			state := historicalImportState{SchemaVersion: importSchemaVersion, RunID: "restart", Status: importStatusPreparing, Phase: importPhaseScanning}
+			if preparedSnapshot {
 				state.Status, state.SnapshotID, state.SnapshotUpperBound = importStatusRunning, "prepared", 17
-				state.PageTargets = []pluginsdk.UsageCollectionTargetV1{target}
-				state.PageDates, state.Dates = map[string][]string{target.SubjectBinding: {""}}, []string{""}
 			}
 			require.NoError(t, p.writeHistoricalImportState(context.Background(), "ws", state, true))
 			p.Close()
@@ -317,8 +320,8 @@ func TestReviewSourceContractImportRestartsPreparationAndRevalidatesLegacyTarget
 				require.NoError(t, err)
 				require.True(t, found)
 				require.Equal(t, "prepared", stored.SnapshotID)
-				require.Len(t, stored.PageTargets, 1, "membership is frozen and checkpointed before external collection")
-				require.Zero(t, stored.Processed)
+				require.Equal(t, importPhaseScanning, stored.Phase, "membership is frozen before external collection")
+				require.Zero(t, stored.SessionsImported)
 				return []byte(`{"entries":[{"sessionId":"transcript-1","model":"m","input":7}]}`), nil
 			}
 			restarted.runHistoricalImport(context.Background(), "ws")
@@ -326,11 +329,12 @@ func TestReviewSourceContractImportRestartsPreparationAndRevalidatesLegacyTarget
 			require.NoError(t, err)
 			require.True(t, found)
 			require.Equal(t, importStatusCompleted, stored.Status)
-			require.Equal(t, 1, stored.Processed)
-			require.Zero(t, stored.Missing)
+			require.Equal(t, 1, stored.SessionsFound)
+			require.Equal(t, 1, stored.SessionsImported)
+			require.Zero(t, stored.SessionsMissing)
 			require.Equal(t, int32(1), reports.Load())
-			if legacyPage {
-				require.Zero(t, preparations.Load(), "a retained page resumes through bounded eligibility lookup without archive rediscovery")
+			if preparedSnapshot {
+				require.Zero(t, preparations.Load(), "a retained snapshot resumes through bounded eligibility lookup without archive rediscovery")
 			} else {
 				require.Equal(t, int32(3), preparations.Load())
 			}

@@ -196,6 +196,7 @@ func (p *plugin) startUsageStateCleanup() {
 				p.usageCleanupMu.Lock()
 				if !p.usageCleanupClosed && ctx.Err() == nil {
 					p.startCollector()
+					p.resumeHistoricalImports()
 				}
 				p.usageCleanupMu.Unlock()
 				return

@@ -22,54 +22,7 @@ type usageRecordingReader struct {
 	canonicalFn func(context.Context, pluginsdk.SessionUsageFilter, pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error)
 }
 
-func (r *usageRecordingReader) UpsertBatch(_ context.Context, workspaceID string, items []pluginsdk.SessionUsageMeasurement) ([]pluginsdk.SessionUsageWriteResult, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.upserts++
-	if r.writeStatus != "" {
-		results := make([]pluginsdk.SessionUsageWriteResult, len(items))
-		for i, item := range items {
-			results[i] = pluginsdk.SessionUsageWriteResult{
-				SourceRecordID: item.SourceRecordID, UsageIdentity: item.UsageIdentity,
-				Model: item.Model, Provider: item.Provider, Status: r.writeStatus,
-			}
-			for _, existing := range r.items {
-				if existing.SourceRecordID == item.SourceRecordID && existing.UsageIdentity == item.UsageIdentity &&
-					existing.Model == item.Model && existing.Provider == item.Provider {
-					copy := existing
-					results[i].Measurement = &copy
-					break
-				}
-			}
-		}
-		return results, nil
-	}
-	for _, item := range items {
-		item.WorkspaceID = workspaceID
-		found := false
-		for i := range r.items {
-			if r.items[i].SourceRecordID == item.SourceRecordID && r.items[i].UsageIdentity == item.UsageIdentity && r.items[i].Model == item.Model && r.items[i].Provider == item.Provider {
-				r.items[i] = item
-				found = true
-				break
-			}
-		}
-		if !found {
-			r.items = append(r.items, item)
-		}
-	}
-	results := make([]pluginsdk.SessionUsageWriteResult, len(items))
-	for i, item := range items {
-		copy := item
-		results[i] = pluginsdk.SessionUsageWriteResult{
-			SourceRecordID: item.SourceRecordID, UsageIdentity: item.UsageIdentity,
-			Model: item.Model, Provider: item.Provider, Status: "applied", Measurement: &copy,
-		}
-	}
-	return results, nil
-}
-
-func (r *usageRecordingReader) List(_ context.Context, filter pluginsdk.SessionUsageFilter, page pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
+func (r *usageRecordingReader) list(_ context.Context, filter pluginsdk.SessionUsageFilter, page pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.listings++
@@ -103,7 +56,7 @@ func (r *usageRecordingReader) ListCanonical(ctx context.Context, filter plugins
 	if r.canonicalFn != nil {
 		return r.canonicalFn(ctx, filter, page)
 	}
-	return r.List(ctx, filter, page)
+	return r.list(ctx, filter, page)
 }
 
 func containsString(items []string, target string) bool {
@@ -274,7 +227,7 @@ func TestPersistSessionUsagePreservesTokscaleUnknownFields(t *testing.T) {
 	require.Equal(t, "estimated", item.CostBasis)
 }
 
-func TestHistoricalImportResumesAndPersistsUndatedUsage(t *testing.T) {
+func TestHistoricalImportResumesAndPersistsDatedUsage(t *testing.T) {
 	started := "2026-09-12T10:00:00Z"
 	usage := &usageRecordingReader{}
 	host := &usageRecordingHost{
@@ -288,6 +241,7 @@ func TestHistoricalImportResumesAndPersistsUndatedUsage(t *testing.T) {
 	p.lookPath = noLookPath
 	p.run = modelsRunner([]byte(`{"entries":[{"sessionId":"transcript-1","model":"model-a","input":10,"output":5,"cost":0.125}]}`), nil)
 	p.SetHost(host)
+	p.importWait = func(context.Context) bool { return true }
 	defer stopPluginWorkers(p)
 
 	response, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
@@ -304,13 +258,24 @@ func TestHistoricalImportResumesAndPersistsUndatedUsage(t *testing.T) {
 	state, found, err := host.GetState(context.Background(), importStateScope, "ws-1", importStateKey)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, float64(1), state["processed"])
-	require.Equal(t, false, state["undated"])
+	require.Equal(t, float64(1), state["sessions_imported"])
+	require.Equal(t, float64(1), state["sessions_found"])
+	require.NotContains(t, state, "undated", "a single-day dated session is not undated")
 	usage.mu.Lock()
-	require.Len(t, usage.items, 1)
-	require.Equal(t, "2026-09-12", usage.items[0].SourceDate)
-	require.Equal(t, "date:transcript-1:2026-09-12", usage.items[0].UsageIdentity)
-	usage.mu.Unlock()
+	defer usage.mu.Unlock()
+	require.Len(t, usage.items, 2, "one lifetime report and one report for the single active day")
+	var dated *pluginsdk.SessionUsageMeasurement
+	for i := range usage.items {
+		if usage.items[i].SourceDate == "" {
+			require.Equal(t, "lifetime:transcript-1", usage.items[i].UsageIdentity)
+			continue
+		}
+		copy := usage.items[i]
+		dated = &copy
+	}
+	require.NotNil(t, dated, "the active day still saves dated usage")
+	require.Equal(t, "2026-09-12", dated.SourceDate)
+	require.Equal(t, "date:transcript-1:2026-09-12", dated.UsageIdentity)
 }
 
 func TestHistoricalImportIsDisabledWithCollectionOff(t *testing.T) {
@@ -335,8 +300,8 @@ func stopPluginWorkers(p *plugin) {
 	}
 	p.collectorMu.Unlock()
 	p.importMu.Lock()
-	if p.importCancel != nil {
-		p.importCancel()
+	if p.importActive != nil {
+		p.importActive.cancel()
 	}
 	p.importMu.Unlock()
 }

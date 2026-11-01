@@ -89,12 +89,13 @@ func TestHistoricalTrustedRetainedDatesWithoutLiveSession(t *testing.T) {
 		dates = append(dates, date)
 		return []byte(`{"entries":[{"sessionId":"transcript-1","model":"m","input":1}]}`), nil
 	}
-	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: 2, DiagnosticsReliable: true, Status: importStatusRunning}))
+	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: importSchemaVersion, Status: importStatusRunning, RunID: "run-1"}))
 	p.runHistoricalImport(context.Background(), "ws")
-	require.Equal(t, []string{"2026-10-25", "2026-10-26"}, dates)
-	require.Len(t, writes, 2)
-	for i, item := range writes {
-		require.Equal(t, dates[i], *item.Coverage.SourceDate)
+	require.Equal(t, []string{"lifetime", "2026-10-25", "2026-10-26"}, dates)
+	require.Len(t, writes, 3)
+	require.Nil(t, writes[0].Coverage, "the all-time step saves undated lifetime usage first")
+	for i, item := range writes[1:] {
+		require.Equal(t, dates[i+1], *item.Coverage.SourceDate)
 	}
 }
 
@@ -311,14 +312,16 @@ func TestHistoricalTrustedLongIntervalQueuesOneDay(t *testing.T) {
 	host.sessions = nil
 	p.importWait = func(context.Context) bool { return false }
 	p.run = modelsRunner([]byte(`{"entries":[]}`), nil)
-	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: 2, DiagnosticsReliable: true, Status: importStatusRunning}))
+	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: importSchemaVersion, Status: importStatusRunning, RunID: "run-1"}))
 	p.runHistoricalImport(context.Background(), "ws")
 	state, _, err := p.loadHistoricalImportState(context.Background(), "ws")
 	require.NoError(t, err)
 	require.Equal(t, importStatusCancelled, state.Status)
-	require.Equal(t, []string{"2000-01-02"}, state.Dates)
-	require.Equal(t, []string{"2000-01-01", "2098-12-31"}, state.PageDates[target.SubjectBinding])
-	require.Zero(t, state.Processed)
+	require.Equal(t, []historicalImportInterval{{Start: "2000-01-01", End: "2098-12-31"}}, state.Intervals)
+	require.Equal(t, "2000-01-01", state.NextDay, "the first daily step resumes at the interval start")
+	require.Zero(t, state.DaysDone)
+	require.Equal(t, importIntervalDays(state.Intervals), state.DaysTotal)
+	require.Greater(t, state.DaysTotal, 1)
 }
 
 func TestUsageHistoryProjectionReadyEmptyAllowsManualCalculationWhenDisabled(t *testing.T) {

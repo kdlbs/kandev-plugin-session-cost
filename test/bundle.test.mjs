@@ -224,7 +224,7 @@ function createActionHarness(options = {}) {
   const document = createDocument();
   const timers = createFakeTimers();
   const ui = Object.fromEntries(
-    ["Button", "Spinner", "Tooltip", "TooltipTrigger", "TooltipContent"].map((name) => [name, name]),
+    ["Button", "Progress", "Spinner", "Tooltip", "TooltipTrigger", "TooltipContent"].map((name) => [name, name]),
   );
   if (options.action) ui.Action = function Action() {};
   const sandbox = {
@@ -673,15 +673,17 @@ test("historical import actions follow the selected workspace and interpolate st
     context: { getWorkspaceIds: () => ["ws-1", "ws-2"], getActiveWorkspaceId: () => "ws-2" },
     invokeAction: (key, input) => {
       actions.push({ key, input });
-      return Promise.resolve({ status: "completed", processed: 7, missing: 2, last_successful_at: "2026-10-05" });
+      return Promise.resolve({ status: "completed", phase: "completed", sessions_found: 9, sessions_imported: 7, sessions_missing: 2, sessions_skipped: 1, undated: true, last_successful_at: "2026-10-05" });
     },
   });
   await flushPromises();
   assert.equal(actions[0].key, "historical-import-status");
   assert.equal(actions[0].input.workspaceId, "ws-2");
-  assert.match(view.text(), /Processed 7 sessions/);
-  assert.match(view.text(), /2 sessions have no matching/);
-  assert.match(view.text(), /Last successful pass: 2026-10-05/);
+  assert.match(view.text(), /Imported 7 of 9 sessions\./);
+  assert.match(view.text(), /No local transcript: 2/);
+  assert.match(view.text(), /Skipped \(not safe\): 1/);
+  assert.match(view.text(), /Last imported 2026-10-05/);
+  assert.doesNotMatch(view.text(), /Charts fill in as days finish|You can leave this page|no source date/);
   const start = findElement(view.tree(), (node) => node.type === "Button" && renderedText(node) === "Import again");
   start.props.onClick();
   await flushPromises();
@@ -784,14 +786,60 @@ test("unsupported retained hosts preserve saved costs and show upgrade guidance"
   assert.match(view.text(), /Upgrade Kandev to save retained usage/);
 });
 
-test("legacy import diagnostics do not present unreliable counts as exact", async () => {
+test("failed import shows the stopped day and offers Resume", async () => {
   const view = createActionHarness({ locale: "en", settings: true,
     context: { getWorkspaceIds: () => ["ws"], getActiveWorkspaceId: () => "ws" },
-    invokeAction: () => Promise.resolve({ status: "failed", processed: 200, missing: 300, diagnostics_reliable: false }),
+    invokeAction: () => Promise.resolve({ status: "failed", phase: "daily", current_day: "2026-03-12", sessions_found: 9, sessions_imported: 7, sessions_missing: 2, sessions_skipped: 0 }),
   });
   await flushPromises();
-  assert.match(view.text(), /unreliable missing-session diagnostics/);
-  assert.doesNotMatch(view.text(), /300 sessions have no matching/);
+  assert.match(view.text(), /Import stopped on 2026-03-12\./);
+  assert.match(view.text(), /Check tokscale and try again\./);
+  assert.ok(findElement(view.tree(), node => node.type === "Button" && renderedText(node) === "Resume"));
+  assert.doesNotMatch(view.text(), /Imported 9 of 9/);
+});
+
+test("daily import shows counts, day progress, and an estimate", async () => {
+  const view = createActionHarness({ locale: "en", settings: true,
+    context: { getWorkspaceIds: () => ["ws"], getActiveWorkspaceId: () => "ws" },
+    invokeAction: () => Promise.resolve({ status: "running", phase: "daily", sessions_found: 312, sessions_imported: 287, sessions_missing: 21, sessions_skipped: 4, days_total: 238, days_done: 142, current_day: "2026-03-12", eta_seconds: 2400 }),
+  });
+  await flushPromises();
+  assert.match(view.text(), /Step 2 of 2: Adding daily history/);
+  assert.match(view.text(), /Sessions found: 312/);
+  assert.match(view.text(), /Imported: 287/);
+  assert.match(view.text(), /No local transcript: 21/);
+  assert.match(view.text(), /Skipped \(not safe\): 4/);
+  assert.match(view.text(), /142 of 238 days/);
+  assert.match(view.text(), /Working on 2026-03-12/);
+  assert.match(view.text(), /About 40 min left/);
+  assert.match(view.text(), /All-time totals are ready/);
+  const progress = findElement(view.tree(), node => node.type === "Progress");
+  assert.equal(progress.props.value, 60);
+  assert.equal(progress.props.max, 100);
+  assert.equal(progress.props["aria-label"], "142 of 238 days");
+  assert.ok(findElement(view.tree(), node => node.type === "Button" && renderedText(node) === "Cancel import"));
+});
+
+test("disabled import keeps Resume enabled so collection can be re-enabled", async () => {
+  const view = createActionHarness({ locale: "en", settings: true,
+    context: { getWorkspaceIds: () => ["ws"], getActiveWorkspaceId: () => "ws" },
+    invokeAction: () => Promise.resolve({ status: "disabled", sessions_found: 2, sessions_imported: 0, sessions_missing: 0, sessions_skipped: 0 }),
+  });
+  await flushPromises();
+  const resume = findElement(view.tree(), node => node.type === "Button" && renderedText(node) === "Resume");
+  assert.ok(resume);
+  assert.notEqual(resume.props.disabled, true);
+});
+
+test("queued import names no other workspace and remains cancellable", async () => {
+  const view = createActionHarness({ locale: "en", settings: true,
+    context: { getWorkspaceIds: () => ["ws-1", "ws-2"], getActiveWorkspaceId: () => "ws-2" },
+    invokeAction: () => Promise.resolve({ status: "queued", sessions_found: 0, sessions_imported: 0, sessions_missing: 0, sessions_skipped: 0 }),
+  });
+  await flushPromises();
+  assert.match(view.text(), /Waiting for another import to finish\./);
+  assert.doesNotMatch(view.text(), /ws-1/);
+  assert.ok(findElement(view.tree(), node => node.type === "Button" && renderedText(node) === "Cancel import"));
 });
 
 test("canonical projection lag shows the last saved selection and polls for completion", async () => {
@@ -914,12 +962,12 @@ test("historical discovery preparation remains cancellable and polls without com
     context: { getWorkspaceIds: () => ["ws"], getActiveWorkspaceId: () => "ws" },
     invokeAction(key) {
       actions.push(key);
-      return Promise.resolve({ status: key === "historical-import-cancel" ? "cancelled" : "preparing", processed: 0, missing: 0 });
+      return Promise.resolve({ status: key === "historical-import-cancel" ? "cancelled" : "preparing", sessions_found: 0, sessions_imported: 0, sessions_missing: 0, sessions_skipped: 0 });
     },
   });
   await flushPromises();
-  assert.match(view.text(), /Preparing historical source metadata/);
-  assert.doesNotMatch(view.text(), /Import completed|Processed 0|no matching tokscale/);
+  assert.match(view.text(), /Preparing session metadata/);
+  assert.doesNotMatch(view.text(), /Imported 0 of 0|No local transcript|Skipped/);
   view.advanceTime(2000);
   await flushPromises();
   assert.equal(actions.filter(key => key === "historical-import-status").length, 2);

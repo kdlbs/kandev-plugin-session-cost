@@ -21,10 +21,14 @@ func (p *plugin) Close() {
 	}
 	p.collectorMu.Unlock()
 	p.importMu.Lock()
-	if p.importCancel != nil {
-		p.importCancel()
-	}
+	p.importShuttingDown = true
+	activeImport := p.importActive
 	p.importMu.Unlock()
+	if activeImport != nil {
+		// Shutdown cancels the worker without writing a terminal status; the
+		// restart rule resumes from the persisted position instead.
+		activeImport.cancel()
+	}
 	if p.toolbar != nil {
 		p.toolbar.Close()
 	}

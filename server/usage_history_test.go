@@ -17,30 +17,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHistoricalMissingDiagnosticsDoNotRecountBeyondSample(t *testing.T) {
+func TestHistoricalMissingCountsStayBoundedByTheSnapshot(t *testing.T) {
 	state := historicalImportState{}
 	for pass := 0; pass < 3; pass++ {
 		for i := 0; i < 150; i++ {
-			markMissingSession(&state, fmt.Sprintf("session-%03d", i))
+			state.SessionsFound++
+			state.SessionsMissing++
 		}
 	}
-	require.Equal(t, 150, state.Missing)
-	require.Len(t, state.MissingSessionIDs, maxMissingSessionIDs)
-}
-
-func TestHistoricalLegacyDiagnosticsAreExplicitlyUnreliable(t *testing.T) {
-	p := newPlugin()
-	host := &fakeHost{}
-	p.SetHost(host)
-	require.NoError(t, host.SetState(context.Background(), importStateScope, "ws", importStateKey, map[string]any{
-		"status": importStatusFailed, "missing": 300, "cursor": "mutable-offset", "processed": 200,
-	}))
-	state, found, err := p.loadHistoricalImportState(context.Background(), "ws")
-	require.NoError(t, err)
-	require.True(t, found)
-	response, err := importJSONResponse(200, state)
-	require.NoError(t, err)
-	require.Contains(t, string(response.Body), `"diagnostics_reliable":false`)
+	require.Equal(t, 450, state.SessionsFound)
+	require.Equal(t, 450, state.SessionsMissing)
 }
 
 // The older assertions inspect the compatibility read DTO. Writes in these
@@ -58,7 +44,11 @@ func (r recordingRetainedHistory) ListTargets(_ context.Context, query pluginsdk
 	}
 	page := pluginsdk.UsageCollectionTargetPageV1{SnapshotID: "fixture-snapshot", SnapshotUpperBound: 1}
 	for _, session := range sessions {
-		page.Targets = append(page.Targets, pluginsdk.UsageCollectionTargetV1{SourceScopeStatus: "eligible", SubjectBinding: "binding:" + session.ID, TaskID: session.TaskID, SessionID: optionalString(session.ID), ExternalSessionID: optionalString(session.ACPSessionID), SubjectKind: "session", ActorAttributionStatus: "unknown"})
+		target := pluginsdk.UsageCollectionTargetV1{SourceScopeStatus: "eligible", SubjectBinding: "binding:" + session.ID, TaskID: session.TaskID, SessionID: optionalString(session.ID), ExternalSessionID: optionalString(session.ACPSessionID), SubjectKind: "session", ActorAttributionStatus: "unknown"}
+		if session.StartedAt != "" && session.UpdatedAt != "" {
+			target.SessionStartedAt, target.SessionEndedAt = optionalString(session.StartedAt), optionalString(session.UpdatedAt)
+		}
+		page.Targets = append(page.Targets, target)
 	}
 	if query.Limit > 0 && len(page.Targets) > int(query.Limit) {
 		page.Targets = page.Targets[:query.Limit]
@@ -370,11 +360,10 @@ func TestUsageHistoryBatchesAreBoundedAndValidateReceipts(t *testing.T) {
 	require.ErrorContains(t, p2.reportUsageObservations(context.Background(), rows[:1]), "receipt")
 }
 
-func TestHistoricalUsageHistoryFixedSnapshotMissingCount(t *testing.T) {
+func TestHistoricalUsageHistoryFixedSnapshotCountsEveryPage(t *testing.T) {
 	var queries []pluginsdk.UsageCollectionTargetQueryV1
 	reader := retainedProtocolFixture{list: func(_ context.Context, q pluginsdk.UsageCollectionTargetQueryV1) (pluginsdk.UsageCollectionTargetPageV1, error) {
 		if q.Limit == 1 {
-			require.Equal(t, "fixed", q.SnapshotID)
 			return pluginsdk.UsageCollectionTargetPageV1{SnapshotID: "fixed", SnapshotUpperBound: 150}, nil
 		}
 		queries = append(queries, q)
@@ -386,54 +375,58 @@ func TestHistoricalUsageHistoryFixedSnapshotMissingCount(t *testing.T) {
 		}
 		page := pluginsdk.UsageCollectionTargetPageV1{SnapshotID: "fixed", SnapshotUpperBound: 150, HasMore: offset < 100, NextCursor: strconv.Itoa(offset + 50)}
 		for i := offset; i < offset+50; i++ {
-			page.Targets = append(page.Targets, pluginsdk.UsageCollectionTargetV1{SourceScopeStatus: "eligible", SubjectBinding: fmt.Sprint(i), TaskID: fmt.Sprint(i)})
+			page.Targets = append(page.Targets, pluginsdk.UsageCollectionTargetV1{
+				SourceScopeStatus: "eligible", SubjectBinding: fmt.Sprint(i), TaskID: fmt.Sprint(i),
+				SessionID: optionalString(fmt.Sprint("session-", i)), ExternalSessionID: optionalString(fmt.Sprint("transcript-", i)),
+			})
 		}
 		return page, nil
 	}}
 	p, _ := historyPlugin(t, reader)
-	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: 2, DiagnosticsReliable: true, Status: importStatusRunning}))
+	p.run = modelsRunner([]byte(`{"entries":[]}`), nil)
+	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: importSchemaVersion, Status: importStatusRunning, RunID: "run-1"}))
 	p.runHistoricalImport(context.Background(), "ws")
 	state, _, err := p.loadHistoricalImportState(context.Background(), "ws")
 	require.NoError(t, err)
 	require.Equal(t, importStatusCompleted, state.Status)
-	require.Equal(t, 150, state.Missing)
-	require.Equal(t, 150, state.Processed)
-	require.Len(t, state.MissingSessionIDs, 100)
-	require.Empty(t, state.PageMissingIDs)
+	require.Equal(t, 150, state.SessionsFound)
+	require.Equal(t, 150, state.SessionsMissing)
+	require.Zero(t, state.SessionsImported)
+	require.Zero(t, state.DaysTotal)
 	require.Len(t, queries, 3)
-	require.Empty(t, queries[0].SnapshotID)
-	require.Equal(t, "fixed", queries[1].SnapshotID)
+	require.Equal(t, "fixed", queries[0].SnapshotID)
 	require.Equal(t, "50", queries[1].Cursor)
 	require.Equal(t, "100", queries[2].Cursor)
 }
 
-func TestHistoricalUsageHistoryResumeRetainsDeletedTargetAndPendingDate(t *testing.T) {
+func TestHistoricalUsageHistoryResumeRebuildsTheRetainedIndex(t *testing.T) {
 	t.Setenv("TZ", "UTC")
-	var queries []pluginsdk.UsageCollectionTargetQueryV1
 	var sourceQueries []pluginsdk.UsageCollectionTargetQueryV1
+	var scanQueries []pluginsdk.UsageCollectionTargetQueryV1
 	var writes []pluginsdk.UsageObservationV1
+	rangeTarget := testTarget()
+	rangeTarget.SessionStartedAt, rangeTarget.SessionEndedAt = optionalString("2026-10-24T12:00:00Z"), optionalString("2026-10-25T12:00:00Z")
 	reader := retainedProtocolFixture{list: func(_ context.Context, q pluginsdk.UsageCollectionTargetQueryV1) (pluginsdk.UsageCollectionTargetPageV1, error) {
+		if q.CurrentTarget != nil {
+			require.Empty(t, q.SnapshotID, "current source authorization must not trust checkpoint eligibility")
+			require.Empty(t, q.Cursor)
+			require.Equal(t, rangeTarget.SubjectBinding, q.CurrentTarget.SubjectBinding)
+			sourceQueries = append(sourceQueries, q)
+			return pointTargetPage(rangeTarget), nil
+		}
 		if q.Limit == 1 {
 			require.Equal(t, "immutable", q.SnapshotID)
 			return pluginsdk.UsageCollectionTargetPageV1{SnapshotID: "immutable", SnapshotUpperBound: 2}, nil
 		}
-		if q.CurrentTarget != nil {
-			require.Empty(t, q.SnapshotID, "current source authorization must not trust checkpoint eligibility")
-			require.Empty(t, q.Cursor)
-			require.Equal(t, testTarget().SubjectBinding, q.CurrentTarget.SubjectBinding)
-			sourceQueries = append(sourceQueries, q)
-			return pluginsdk.UsageCollectionTargetPageV1{SnapshotID: "immutable", SnapshotUpperBound: 2, Targets: []pluginsdk.UsageCollectionTargetV1{testTarget()}}, nil
-		}
+		require.Equal(t, "immutable", q.SnapshotID)
 		require.Equal(t, importPageSize, q.Limit)
-		queries = append(queries, q)
+		scanQueries = append(scanQueries, q)
 		page := pluginsdk.UsageCollectionTargetPageV1{SnapshotID: "immutable", SnapshotUpperBound: 2}
 		if q.Cursor == "" {
-			require.Empty(t, q.SnapshotID)
-			page.Targets = []pluginsdk.UsageCollectionTargetV1{testTarget()}
+			page.Targets = []pluginsdk.UsageCollectionTargetV1{rangeTarget}
 			page.HasMore = true
 			page.NextCursor = "after-first"
 		} else {
-			require.Equal(t, "immutable", q.SnapshotID)
 			require.Equal(t, "after-first", q.Cursor)
 			page.Targets = []pluginsdk.UsageCollectionTargetV1{{SourceScopeStatus: "eligible", SubjectBinding: "second-missing", TaskID: "deleted-task"}}
 		}
@@ -443,42 +436,30 @@ func TestHistoricalUsageHistoryResumeRetainsDeletedTargetAndPendingDate(t *testi
 		return acceptedBatch(b), nil
 	}}
 	p, host := historyPlugin(t, reader)
-	host.sessions = []pluginsdk.Session{{ID: "session-1", TaskID: "task-1", ACPSessionID: "transcript-1", StartedAt: "2026-10-24T12:00:00Z", UpdatedAt: "2026-10-25T12:00:00Z", State: "COMPLETED"}}
-	p.run = modelsRunner([]byte(`{"entries":[]}`), nil)
-	p.importWait = func(context.Context) bool { return false }
-	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: 2, DiagnosticsReliable: true, Status: importStatusRunning, RunID: "run-1"}))
+	host.sessions = nil
+	host.sessionsFn = func(context.Context, pluginsdk.SessionFilter, pluginsdk.Page) ([]pluginsdk.Session, error) {
+		t.Fatal("a resumed import queried live sessions")
+		return nil, nil
+	}
+	p.run = modelsRunner([]byte(`{"entries":[{"sessionId":"transcript-1","model":"m","input":3}]}`), nil)
+	p.importWait = func(context.Context) bool { return true }
+	require.NoError(t, p.writeHistoricalImportState(context.Background(), "ws", historicalImportState{
+		SchemaVersion: importSchemaVersion, Status: importStatusRunning, RunID: "run-1",
+		SnapshotID: "immutable", SnapshotUpperBound: 2, Phase: importPhaseDaily,
+		Intervals: []historicalImportInterval{{Start: "2026-10-25", End: "2026-10-25"}},
+		DaysTotal: 1, NextDay: "2026-10-25", SessionsFound: 2, SessionsMissing: 1,
+	}, true))
 	p.runHistoricalImport(context.Background(), "ws")
 	state, _, err := p.loadHistoricalImportState(context.Background(), "ws")
 	require.NoError(t, err)
-	require.Equal(t, importStatusCancelled, state.Status)
-	require.Zero(t, state.Processed)
-	require.Zero(t, state.Missing)
-	require.Equal(t, []string{"2026-10-25"}, state.Dates)
-	require.Len(t, state.PageTargets, 1)
-	// Deleting the live task/session must not cause mutable rediscovery of this page.
-	host.sessionsFn = func(context.Context, pluginsdk.SessionFilter, pluginsdk.Page) ([]pluginsdk.Session, error) {
-		t.Fatal("resumed page queried live sessions")
-		return nil, nil
-	}
-	restarted := newPlugin()
-	restarted.UnimplementedPlugin.SetHost(host)
-	defer restarted.Close()
-	restarted.lookPath = noLookPath
-	restarted.importWait = func(context.Context) bool { return true }
-	restarted.run = modelsRunner([]byte(`{"entries":[{"sessionId":"transcript-1","model":"m","input":3}]}`), nil)
-	state.Status = importStatusRunning
-	state.RunID = "run-2"
-	require.NoError(t, restarted.writeHistoricalImportState(context.Background(), "ws", state, true))
-	restarted.runHistoricalImport(context.Background(), "ws")
-	state, _, err = restarted.loadHistoricalImportState(context.Background(), "ws")
-	require.NoError(t, err)
 	require.Equal(t, importStatusCompleted, state.Status)
-	require.Equal(t, 2, state.Processed)
-	require.Equal(t, 1, state.Missing)
-	require.Len(t, queries, 2)
-	require.Len(t, sourceQueries, 4, "each dated report obtains current source authorization before and after calculation")
+	require.Equal(t, importPhaseCompleted, state.Phase)
+	require.Equal(t, 1, state.DaysDone)
+	require.Empty(t, state.NextDay)
+	require.Len(t, scanQueries, 2, "the immutable snapshot rebuilds the whole index")
+	require.Len(t, sourceQueries, 1, "the exact binding is reauthorized before the write")
 	require.Len(t, writes, 1)
-	require.Equal(t, testTarget().SubjectBinding, writes[0].SubjectBinding)
+	require.Equal(t, rangeTarget.SubjectBinding, writes[0].SubjectBinding)
 	require.Equal(t, "2026-10-25", *writes[0].Coverage.SourceDate)
 }
 
@@ -645,7 +626,7 @@ func TestUsageHistoryDisplayAggregationDoesNotOverflowOrInventUnknowns(t *testin
 
 func TestHistoricalCancellationDoesNotAllowOldCheckpointToReviveImport(t *testing.T) {
 	p, _ := historyPlugin(t, retainedProtocolFixture{})
-	state := historicalImportState{SchemaVersion: 2, Status: importStatusRunning, RunID: "old"}
+	state := historicalImportState{SchemaVersion: importSchemaVersion, Status: importStatusRunning, RunID: "old"}
 	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", state))
 	cancelled := state
 	cancelled.Status = importStatusCancelled
@@ -654,7 +635,7 @@ func TestHistoricalCancellationDoesNotAllowOldCheckpointToReviveImport(t *testin
 	next := state
 	next.RunID = "new"
 	require.NoError(t, p.writeHistoricalImportState(context.Background(), "ws", next, true))
-	p.finishHistoricalImportRun("ws", importStatusFailed, errors.New("old worker failed"), "old")
+	p.settleHistoricalImport("ws", "old", importStep{status: importStatusFailed, err: errors.New("old worker failed")})
 	require.ErrorIs(t, p.saveHistoricalImportState(context.Background(), "ws", state), context.Canceled)
 	current, _, err := p.loadHistoricalImportState(context.Background(), "ws")
 	require.NoError(t, err)
@@ -666,13 +647,13 @@ func TestHistoricalUsageHistoryRejectsChangingSnapshot(t *testing.T) {
 	p, _ := historyPlugin(t, retainedProtocolFixture{list: func(context.Context, pluginsdk.UsageCollectionTargetQueryV1) (pluginsdk.UsageCollectionTargetPageV1, error) {
 		return pluginsdk.UsageCollectionTargetPageV1{SnapshotID: "different", SnapshotUpperBound: 7}, nil
 	}})
-	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: 2, DiagnosticsReliable: true, Status: importStatusRunning, SnapshotID: "fixed", SnapshotUpperBound: 7, Cursor: "keyset"}))
+	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: importSchemaVersion, Status: importStatusRunning, SnapshotID: "fixed", SnapshotUpperBound: 7}))
 	p.runHistoricalImport(context.Background(), "ws")
 	state, _, err := p.loadHistoricalImportState(context.Background(), "ws")
 	require.NoError(t, err)
 	require.Equal(t, importStatusFailed, state.Status)
 	require.Contains(t, state.LastError, "changed the usage target snapshot")
-	require.Zero(t, state.Processed)
+	require.Zero(t, state.SessionsFound)
 }
 
 func TestCollectorUsageHistoryDisableDuringReportPreservesPendingWork(t *testing.T) {

@@ -41,11 +41,47 @@ type collectorPending struct {
 	Attempts       int            `json:"attempts,omitempty"`
 	Dates          []string       `json:"dates,omitempty"`
 	DateAttempts   map[string]int `json:"date_attempts,omitempty"`
+	// Skipped marks a live session the Host currently reports as ineligible.
+	// The entry stays queued for a later pass instead of blocking the others.
+	Skipped bool `json:"skipped,omitempty"`
+}
+
+// collectionSetting separates a failed Host config read from a real false
+// value. Import must keep retrying a transient read instead of stopping.
+func (p *plugin) collectionSetting(ctx context.Context) (bool, bool) {
+	host := p.Host()
+	if host == nil {
+		return false, false
+	}
+	cfg, err := host.GetConfig(ctx)
+	if err != nil {
+		log.Printf("reading plugin config: %v", err)
+		return false, false
+	}
+	value, ok := cfg[configKeyCollect].(bool)
+	if !ok {
+		return false, true
+	}
+	return value, true
 }
 
 func (p *plugin) collectionEnabled(ctx context.Context) bool {
-	value, ok := p.config(ctx)[configKeyCollect].(bool)
-	return ok && value
+	enabled, known := p.collectionSetting(ctx)
+	return known && enabled
+}
+
+// awaitImportCollection waits through a transient config read failure. It
+// returns ok=false only when the worker context ended.
+func (p *plugin) awaitImportCollection(ctx context.Context) (enabled, ok bool) {
+	for {
+		value, known := p.collectionSetting(ctx)
+		if known {
+			return value, true
+		}
+		if !p.waitImportBudget(ctx, 0) {
+			return false, false
+		}
+	}
 }
 
 func (p *plugin) collectionInterval(ctx context.Context) time.Duration {
@@ -127,7 +163,13 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 		liveIDs[session.ID] = true
 	}
 	for id, pending := range checkpoint.Pending {
-		if liveIDs[id] || pending.SubjectBinding == "" {
+		if liveIDs[id] {
+			continue
+		}
+		if pending.SubjectBinding == "" {
+			// A binding-less entry can never be collected once its session is
+			// gone; keeping it would grow the checkpoint forever.
+			delete(checkpoint.Pending, id)
 			continue
 		}
 		state := pending.State
@@ -185,12 +227,25 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 				if taskErr == nil && task != nil {
 					target, targetErr := p.resolveUsageTarget(ctx, task.WorkspaceID, session.TaskID, session.ID, session.ACPSessionID)
 					if targetErr != nil {
-						return targetErr
+						if !usageSourceIneligible(targetErr) {
+							// A transient Host read aborts the pass without losing
+							// saved work; the next pass retries the same session.
+							return targetErr
+						}
+						pending.Skipped = true
+					} else {
+						pending.SubjectBinding = target.SubjectBinding
+						pending.WorkspaceID = task.WorkspaceID
+						pending.Skipped = false
 					}
-					pending.SubjectBinding = target.SubjectBinding
-					pending.WorkspaceID = task.WorkspaceID
 				}
 			}
+		}
+		if pending.Skipped && isTerminalState(session.State) {
+			// A terminal skipped session cannot become eligible while it is
+			// still this state; stop carrying it in the checkpoint.
+			delete(checkpoint.Pending, session.ID)
+			continue
 		}
 		checkpoint.Pending[session.ID] = pending
 		eligible = append(eligible, session)
@@ -206,11 +261,19 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 	if err := p.saveCollectorCheckpoint(ctx, host, checkpoint); err != nil {
 		return err
 	}
+	skipped := make(map[string]bool)
 	for _, session := range eligible {
 		pending := checkpoint.Pending[session.ID]
 		if err := p.preflightSource(ctx, pending.WorkspaceID, session.TaskID, session.ID, session.ACPSessionID); err != nil {
-			return err
+			if !usageSourceIneligible(err) {
+				return err
+			}
+			markCollectorSessionSkipped(&checkpoint, skipped, session.ID)
 		}
+	}
+	eligible = withoutSkippedSessions(eligible, skipped)
+	if len(eligible) == 0 {
+		return p.saveCollectorCheckpoint(ctx, host, checkpoint)
 	}
 	warn, high := p.configuredThresholds(ctx)
 	cmd := resolveCommand(p.configuredCommand(ctx), p.lookPath)
@@ -232,14 +295,22 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 			if err := p.checkTokscaleSnapshotCoverage(ctx, &response, usageCoverage{}); err != nil {
 				return err
 			}
+			continue
 		}
-		if response.Found {
-			pending, err := p.persistCollectorUsage(ctx, checkpoint.Pending[session.ID], session, &response, usageCoverage{})
-			if err != nil {
+		pending, err := p.persistCollectorUsage(ctx, checkpoint.Pending[session.ID], session, &response, usageCoverage{})
+		if err != nil {
+			if !usageSourceIneligible(err) {
 				return err
 			}
-			checkpoint.Pending[session.ID] = pending
+			markCollectorSessionSkipped(&checkpoint, skipped, session.ID)
+			continue
 		}
+		pending.Skipped = false
+		checkpoint.Pending[session.ID] = pending
+	}
+	eligible = withoutSkippedSessions(eligible, skipped)
+	if len(eligible) == 0 {
+		return p.saveCollectorCheckpoint(ctx, host, checkpoint)
 	}
 
 	date := nextCollectionDate(checkpoint.Pending, eligible, checkpoint.LastDate)
@@ -248,9 +319,16 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 			pending := checkpoint.Pending[session.ID]
 			if containsDate(pending.Dates, date) {
 				if err := p.preflightSource(ctx, pending.WorkspaceID, session.TaskID, session.ID, session.ACPSessionID); err != nil {
-					return err
+					if !usageSourceIneligible(err) {
+						return err
+					}
+					markCollectorSessionSkipped(&checkpoint, skipped, session.ID)
 				}
 			}
+		}
+		eligible = withoutSkippedSessions(eligible, skipped)
+		if len(eligible) == 0 {
+			return p.saveCollectorCheckpoint(ctx, host, checkpoint)
 		}
 		runCtx, cancel := context.WithTimeout(ctx, reportTimeout)
 		dateEntries, dateErr := p.runDatedReport(runCtx, cmd, date, date)
@@ -275,26 +353,31 @@ func (p *plugin) collectOnce(ctx context.Context) error {
 				if err := p.checkTokscaleSnapshotCoverage(ctx, &response, usageCoverage{Date: date, Timezone: sourceTimezone()}); err != nil {
 					return err
 				}
+				finishObservedDate(&pending, date)
+				checkpoint.Pending[session.ID] = pending
+				continue
 			}
-			if response.Found {
-				updated, persistErr := p.persistCollectorUsage(ctx, pending, session, &response, usageCoverage{Date: date, Timezone: sourceTimezone()})
-				if persistErr != nil {
-					return persistErr
+			updated, persistErr := p.persistCollectorUsage(ctx, pending, session, &response, usageCoverage{Date: date, Timezone: sourceTimezone()})
+			if persistErr != nil {
+				if usageSourceIneligible(persistErr) {
+					markCollectorSessionSkipped(&checkpoint, skipped, session.ID)
+					continue
 				}
-				pending = updated
-				if isActiveState(session.State) && date == pending.ActiveDate {
-					pending.Dates = removeDate(pending.Dates, date)
-					delete(pending.DateAttempts, date)
-				} else {
-					finishObservedDate(&pending, date)
-				}
-				pending.Attempts = 0
+				return persistErr
+			}
+			pending = updated
+			pending.Skipped = false
+			if isActiveState(session.State) && date == pending.ActiveDate {
+				pending.Dates = removeDate(pending.Dates, date)
+				delete(pending.DateAttempts, date)
 			} else {
 				finishObservedDate(&pending, date)
 			}
+			pending.Attempts = 0
 			checkpoint.Pending[session.ID] = pending
 		}
 	}
+	eligible = withoutSkippedSessions(eligible, skipped)
 	for _, session := range eligible {
 		pending, ok := checkpoint.Pending[session.ID]
 		if !ok {
@@ -618,6 +701,31 @@ func (p *plugin) persistCollectorUsage(ctx context.Context, pending collectorPen
 	}
 	pending.SubjectBinding, pending.WorkspaceID = target.SubjectBinding, workspace
 	return pending, p.persistTargetUsage(ctx, target, response, coverage)
+}
+
+// markCollectorSessionSkipped keeps a per-session source result out of this
+// pass while leaving the entry for a later retry.
+func markCollectorSessionSkipped(checkpoint *collectorCheckpoint, skipped map[string]bool, sessionID string) {
+	skipped[sessionID] = true
+	pending, ok := checkpoint.Pending[sessionID]
+	if !ok {
+		return
+	}
+	pending.Skipped = true
+	checkpoint.Pending[sessionID] = pending
+}
+
+func withoutSkippedSessions(sessions []pluginsdk.Session, skipped map[string]bool) []pluginsdk.Session {
+	if len(skipped) == 0 {
+		return sessions
+	}
+	kept := sessions[:0]
+	for _, session := range sessions {
+		if !skipped[session.ID] {
+			kept = append(kept, session)
+		}
+	}
+	return kept
 }
 
 // Keep only days actually observed active. This bounded queue is not history

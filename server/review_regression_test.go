@@ -73,8 +73,8 @@ func TestImportCancellationCannotBecomeFailure(t *testing.T) {
 	p := newPlugin()
 	p.SetHost(&fakeHost{})
 	ctx := context.Background()
-	require.NoError(t, p.saveHistoricalImportState(ctx, "ws", historicalImportState{Status: importStatusCancelled}))
-	p.finishHistoricalImport("ws", importStatusFailed, context.Canceled)
+	require.NoError(t, p.saveHistoricalImportState(ctx, "ws", historicalImportState{SchemaVersion: importSchemaVersion, Status: importStatusCancelled}))
+	p.settleHistoricalImport("ws", "", importStep{status: importStatusFailed, err: context.Canceled})
 	state, _, err := p.loadHistoricalImportState(ctx, "ws")
 	require.NoError(t, err)
 	require.Equal(t, importStatusCancelled, state.Status)
@@ -89,7 +89,12 @@ func TestHistoricalImportResumesPendingDate(t *testing.T) {
 	p := newPlugin()
 	p.SetHost(host)
 	defer stopPluginWorkers(p)
-	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{SchemaVersion: 2, DiagnosticsReliable: true, Status: importStatusRunning, SnapshotID: "fixture-snapshot", SnapshotUpperBound: 1, Cursor: "interrupted-page", Dates: []string{"2026-10-01"}, PageTargets: []pluginsdk.UsageCollectionTargetV1{{SourceScopeStatus: "eligible", SubjectBinding: "binding:session", TaskID: "task", SessionID: optionalString("session"), ExternalSessionID: optionalString("transcript")}}, PageDates: map[string][]string{"binding:session": {"2026-10-01"}}, PageFound: map[string]bool{}}))
+	require.NoError(t, p.saveHistoricalImportState(context.Background(), "ws", historicalImportState{
+		SchemaVersion: importSchemaVersion, Status: importStatusRunning, RunID: "run-1",
+		SnapshotID: "fixture-snapshot", SnapshotUpperBound: 1, Phase: importPhaseDaily,
+		Intervals: []historicalImportInterval{{Start: "2026-10-01", End: "2026-10-01"}}, DaysTotal: 1, NextDay: "2026-10-01",
+		SessionsFound: 1, SessionsImported: 1,
+	}))
 	var dates []string
 	p.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		for i, arg := range args {
@@ -105,19 +110,15 @@ func TestHistoricalImportResumesPendingDate(t *testing.T) {
 	require.Equal(t, "2026-10-01", usage.items[0].SourceDate)
 }
 
-func TestImportWaitHonorsIntervalAndCancellation(t *testing.T) {
+func TestImportWaitHonorsPreviousReportDurationAndCancellation(t *testing.T) {
+	require.Equal(t, 5*time.Second, importReportPause(0))
+	require.Equal(t, 12*time.Second, importReportPause(12*time.Second))
+	require.Equal(t, 60*time.Second, importReportPause(5*time.Minute))
+
 	p := newPlugin()
-	p.SetHost(&fakeHost{config: map[string]any{configKeyInterval: 1}})
 	ctx, cancel := context.WithCancel(context.Background())
-	finished := make(chan bool, 1)
-	go func() { finished <- p.waitImportBudget(ctx) }()
-	select {
-	case <-finished:
-		t.Fatal("import bypassed its interval budget")
-	case <-time.After(20 * time.Millisecond):
-	}
 	cancel()
-	require.False(t, <-finished)
+	require.False(t, p.waitImportBudget(ctx, 0), "cancellation stops the pause before it starts")
 }
 
 func TestSourceDateAndTimezoneShareTZOverride(t *testing.T) {

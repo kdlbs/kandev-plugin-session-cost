@@ -35,6 +35,14 @@ Settings are generated from `manifest.yaml`:
 - Optional statistics collection is disabled by default. When enabled, it
   saves measurements every five minutes (minimum one minute). The settings
   card offers an explicit, resumable historical import using dated buckets.
+- Historical import has two steps. It first reads one lifetime report so
+  all-time totals appear, then reads one report per active source day for the
+  charts. Reports are paced from the previous duration, clamped to 5-60
+  seconds. A checkpoint resumes after a restart, a second workspace waits in a
+  start-order queue, and an ineligible session is counted as skipped instead of
+  stopping the run. The card shows the step, day progress, session counts, and
+  an estimate after three completed days. A failed day keeps its position and
+  offers Resume.
 - Saved canonical usage loads before an explicit refresh. Unknown cost remains
   unavailable rather than appearing as zero.
 - Refresh is available while details are pinned. Reports run in the background
@@ -52,6 +60,28 @@ Settings are generated from `manifest.yaml`:
 
 The action label and details are registered with Kandev's plugin translation
 API. English is the fallback; Portuguese (Portugal) is also included.
+
+## Current verification (2026-11-01)
+
+The installed-Host historical-import smoke passed on `chromium` and
+`mobile-chrome` with retries disabled. It uses a non-empty synthetic tokscale
+report to verify adoption of existing sessions, visible progress, an unsafe
+session skip, a queued workspace, recovery after backend restart, and the
+Token Usage result. The main workspace imported one of two sessions and marked
+the unsafe session as skipped. The queued workspace imported its one session.
+The imported record matched 1,620 tokens and 4,200 cost subcents.
+
+A separate real tokscale timing sample covered 5,193 sessions over 129 days.
+The slowest sampled lifetime report took 72.01 seconds, a warm lifetime report
+took 24.56 seconds, and a bounded-day report took 18.58 seconds. All were below
+the 120-second timeout. These measurements depend on the machine and history;
+they do not guarantee the same time for a larger history. The browser smoke
+uses synthetic data and does not invoke real tokscale.
+
+`make test` passed, including the Go suite, 71 Node tests, bundle syntax,
+package verification, and release-version checks. Fresh GitHub checks for the
+updated PR head are pending. The core full-scale PostgreSQL and zero-FLAKY gates
+remain open, and this validation does not establish a minimum Host version.
 
 ## Requirements and permissions
 
@@ -85,6 +115,12 @@ The Host supplies durable subject bindings and owns actor attribution and collec
 The plugin saves bindings and pending revisions in Host state before report admission.
 An uncertain response replays the same revision and digest after restart.
 Reports contain at most 200 observations.
+
+Historical import requires a Host with the retained usage-history interface.
+Import requires statistics collection to be enabled; disabling it during a run
+stops the import with a resumable disabled state. A Host with the
+`features.usageHistory` release toggle off reports the retained interface as
+unsupported, so the card asks for an upgrade rather than importing.
 
 ### Host trust and action scope
 
@@ -340,7 +376,7 @@ Earlier toolbar-only checks do not show current-package compatibility. No older 
 
 The parent owns the full-scale core benchmark and final integration review. Task 06 remains open until the Host behavior is corrected and lifecycle and privacy checks pass.
 
-## Current integration and compatibility status (E6, 2026-10-31)
+## Historical integration and compatibility checkpoint (E6, 2026-10-31)
 
 The tested archive is `kandev-session-cost-0.5.0.tar.gz`, SHA-256
 `b53001dc639cddb36c757e798f7c492ec3b2c8fc7543fc73bddf3be35bfb1a9e`. It was
@@ -372,9 +408,11 @@ anonymous legacy GET denial (HTTP 401), cross-workspace denial, and fixed
 upgrade guidance for authenticated users. The guidance exposed no usage values
 or target IDs, ran no Tokscale fixture command, and left usage totals unchanged.
 
-The Tokscale fixture returned an empty report. The import status completed and
-accounted for every processed target as missing. This verifies bounded import
-status and diagnostics; it does not show that Tokscale data was imported.
+At the E6 checkpoint, the Tokscale fixture returned an empty report. The import
+status completed and accounted for every processed target as missing. This
+verified bounded import status and diagnostics, but did not prove source-data
+import. The non-empty follow-up result is recorded in Current verification
+above.
 
 The same unchanged archive was accepted by the exact tagged older Hosts:
 
@@ -495,13 +533,17 @@ HOST_ROOT=$PLUGIN_ROOT/../kandev
 Run both projects separately against the rebuilt package, after core integration is available.
 The tests install the archive through the host UI and replace only the external tokscale command.
 The retained flow uses real Host admission, canonical reads, and lifecycle operations.
-It also checks that a different plugin's source-owned read cannot expose Session Cost observations.
+The historical import smoke uses non-empty synthetic reports and verifies legacy-session adoption,
+visible progress, a queued workspace, recovery after a plugin restart, and the Token Usage result on
+desktop and phone. It also checks that a different plugin's source-owned read cannot expose Session
+Cost observations.
 The Host binaries, web build, and E2E fixture package must come from the same core source.
 
 ```sh
 (cd "$HOST_ROOT/apps/web" && \
   NODE_OPTIONS='--import=tsx' \
   GOMAXPROCS=2 GOFLAGS=-p=1 KANDEV_HOST_ROOT="$HOST_ROOT" \
+  CAPTURE_PR_ASSETS=1 \
   SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.5.0.tar.gz" \
   SESSION_COST_EXPECT_ACTION=1 E2E_PORT_OFFSET=22 \
   pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs" \
@@ -510,6 +552,7 @@ The Host binaries, web build, and E2E fixture package must come from the same co
 (cd "$HOST_ROOT/apps/web" && \
   NODE_OPTIONS='--import=tsx' \
   GOMAXPROCS=2 GOFLAGS=-p=1 KANDEV_HOST_ROOT="$HOST_ROOT" \
+  CAPTURE_PR_ASSETS=1 \
   SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.5.0.tar.gz" \
   SESSION_COST_EXPECT_ACTION=1 E2E_PORT_OFFSET=23 \
   pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs" \

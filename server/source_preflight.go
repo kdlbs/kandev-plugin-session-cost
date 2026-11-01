@@ -34,6 +34,12 @@ func (p *plugin) currentSourceTarget(ctx context.Context, workspace, task, sessi
 	return target, err
 }
 
+// usageSourceIneligible reports whether a source error applies to one session
+// only. Any other error must stop the pass so saved work is not lost.
+func usageSourceIneligible(err error) bool {
+	return errors.Is(err, errUsageSourceUnavailable) || errors.Is(err, errUsageScopeChanged)
+}
+
 func (p *plugin) unavailableSource(saved *sessionCostResponse, session string, warn, high float64, cause ...error) *sessionCostResponse {
 	response := p.canonicalReadFailure(session, warn, high)
 	if saved != nil {
@@ -49,6 +55,10 @@ func (p *plugin) unavailableSource(saved *sessionCostResponse, session string, w
 		response.ReportError = "source_membership"
 		response.Compatibility = "source_membership_ambiguous"
 		response.Error = errTokscaleMembership.Error()
+	}
+	if len(cause) > 0 && usageSourceIneligible(cause[0]) {
+		// The session itself is ineligible; it is not a Host upgrade gap.
+		response.ReportError = "source_ineligible"
 	}
 	if len(cause) > 0 && errors.Is(historyError(cause[0]), errUsageHistoryUnsupported) {
 		response.ReportError = reportErrorUnavailable

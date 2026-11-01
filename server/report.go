@@ -26,8 +26,9 @@ func newReportCoordinator() *reportCoordinator {
 	return &reportCoordinator{}
 }
 
-// run coalesces concurrent callers around one bounded tokscale process. Each
-// waiter may stop waiting without cancelling the shared process.
+// run coalesces concurrent callers around one bounded tokscale process. A
+// waiter that leaves stops waiting; the shared process is cancelled only when
+// the last waiter leaves before the report finishes.
 func (c *reportCoordinator) run(ctx context.Context, cmd resolvedCommand, runner runner) ([]sessionModelEntry, error) {
 	return c.runScoped(ctx, cmd, "lifetime", runner)
 }
@@ -79,6 +80,8 @@ func (c *reportCoordinator) execute(call *reportCall, runCtx context.Context, cm
 	c.mu.Unlock()
 }
 
+// wait drops one waiter without cancelling the shared process. The process is
+// cancelled only when the last waiter leaves before the report finishes.
 func (c *reportCoordinator) wait(ctx context.Context, call *reportCall) ([]sessionModelEntry, error) {
 	select {
 	case <-call.done:

@@ -66,10 +66,8 @@ type plugin struct {
 	importStateMu      sync.Mutex
 	importRevoked      map[string]bool
 	importMu           sync.Mutex
-	importGeneration   uint64
-	importRunning      bool
-	importWorkspace    string
-	importCancel       context.CancelFunc
+	importActive       *activeImportRun
+	importShuttingDown bool
 }
 
 func newPlugin() *plugin {
@@ -98,6 +96,7 @@ func (p *plugin) SetHost(host pluginsdk.Host) {
 		return
 	}
 	p.startCollector()
+	p.resumeHistoricalImports()
 }
 
 // sessionCostResponse is the authenticated session-usage action payload the
@@ -383,6 +382,11 @@ func (p *plugin) sessionUsage(ctx context.Context, workspaceID, taskID, sessionI
 	response, err := p.calculateSessionCostInScope(ctx, workspaceID, taskID, sessionID)
 	if err != nil {
 		return nil, err
+	}
+	if response.ReportError == "source_ineligible" {
+		// Keep the per-session classification instead of degrading it to the
+		// generic unavailable source copy.
+		return p.unavailableSource(saved, sessionID, warn, high, errUsageSourceUnavailable), nil
 	}
 	if response.Compatibility == "source_context_unavailable" {
 		return p.unavailableSource(saved, sessionID, warn, high), nil

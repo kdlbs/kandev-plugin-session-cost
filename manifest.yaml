@@ -16,9 +16,10 @@ runtime:
     darwin-arm64: "server/plugin-darwin-arm64"
     windows-amd64: "server/plugin-windows-amd64.exe"
 
-# Read-only access to kandev sessions so the backend can map the composer's
-# kandev session id to its agent/ACP transcript id (Host data API). The UI
-# only ever sends kandev ids; the transcript join happens server-side.
+# Reads Kandev sessions, tasks, and saved usage so the backend can map the
+# composer's kandev session id to its agent/ACP transcript id (Host data API).
+# Retained usage reads and admitted writes use the Host usage history API. The
+# UI only ever sends kandev ids; the transcript join happens server-side.
 capabilities:
   api_read: ["sessions", "tasks", "session_usage"]
   api_write: ["session_usage"]

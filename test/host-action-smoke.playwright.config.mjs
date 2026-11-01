@@ -10,16 +10,21 @@ export default {
   ...hostConfig.default,
   rootDir: hostWeb,
   testDir: path.dirname(fileURLToPath(import.meta.url)),
-  testMatch: ["host-action-smoke.spec.mjs", "mobile-session-cost-action-smoke.spec.mjs"],
+  testMatch: [
+    "host-action-smoke.spec.mjs",
+    "historical-import-smoke.spec.mjs",
+    "mobile-historical-import-smoke.spec.mjs",
+    "mobile-session-cost-action-smoke.spec.mjs",
+  ],
   projects: [
     {
       name: "chromium",
-      testMatch: ["host-action-smoke.spec.mjs", "retained-usage-auth-smoke.spec.mjs"],
+      testMatch: ["host-action-smoke.spec.mjs", "historical-import-smoke.spec.mjs", "retained-usage-auth-smoke.spec.mjs"],
       use: { browserName: "chromium", viewport: { width: 1280, height: 800 } },
     },
     {
       name: "mobile-chrome",
-      testMatch: "mobile-session-cost-action-smoke.spec.mjs",
+      testMatch: ["mobile-session-cost-action-smoke.spec.mjs", "mobile-historical-import-smoke.spec.mjs"],
       use: {
         browserName: "chromium",
         viewport: { width: 393, height: 851 },

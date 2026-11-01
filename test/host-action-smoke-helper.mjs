@@ -44,6 +44,9 @@ cat "$directory/report.json"
     release(name) {
       fs.writeFileSync(path.join(directory, name), "");
     },
+    blockNext() {
+      fs.writeFileSync(path.join(directory, "block-next"), "");
+    },
     cleanup() {
       fs.rmSync(directory, { recursive: true, force: true });
     },

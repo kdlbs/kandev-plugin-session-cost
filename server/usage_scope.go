@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log"
 
 	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
@@ -94,67 +95,83 @@ func (p *plugin) authorizedHistoricalImportState(ctx context.Context, workspace 
 	if err != nil || !found {
 		return state, found, err
 	}
-	if preparingImportHasNoMembership(state) {
-		// Preparation contains no former target IDs, dates, counts or samples.
-		// Authorize an initial query in the caller's current workspace scope.
-		reader, readErr := usageHistory(p.Host())
-		if readErr != nil {
-			return historicalImportState{}, false, readErr
-		}
-		query := pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: workspace, Limit: 1}
-		page, readErr := reader.ListTargets(ctx, query)
-		err = readErr
-		if err == nil {
-			err = validateTargetPage(query, 0, page)
-		}
-	} else {
-		err = p.validateUsageSnapshot(ctx, workspace, state.SnapshotID, state.SnapshotUpperBound)
+	if state.SnapshotID == "" {
+		// No captured membership exists yet. The verified action context already
+		// proves workspace access; discovery belongs to the worker so a status
+		// poll cannot create or replace the snapshot the worker will persist.
+		return state, true, nil
 	}
+	err = p.validateUsageSnapshot(ctx, workspace, state.SnapshotID, state.SnapshotUpperBound)
 	if err == nil {
 		return state, true, nil
 	}
 	if !errors.Is(err, errUsageScopeChanged) && !usageScopeDenied(err) {
 		return historicalImportState{}, false, err
 	}
-	// Delete only the checkpoint we validated; a newer authorized run wins.
-	p.importStateMu.Lock()
-	defer p.importStateMu.Unlock()
-	current, exists, readErr := p.loadHistoricalImportState(ctx, workspace)
-	if readErr != nil {
-		return historicalImportState{}, false, readErr
-	}
-	if exists && current.RunID == state.RunID && current.SnapshotID == state.SnapshotID {
-		if p.importRevoked == nil {
-			p.importRevoked = make(map[string]bool)
-		}
-		p.importRevoked[stableUsageID(workspace, state.RunID)] = true
-		if err := p.Host().DeleteState(ctx, importStateScope, workspace, importStateKey); err != nil {
-			return historicalImportState{}, false, err
-		}
-	}
+	p.discardHistoricalImportState(ctx, workspace, state)
 	return historicalImportState{}, false, nil
 }
 
-func preparingImportHasNoMembership(state historicalImportState) bool {
-	return state.Status == importStatusPreparing && state.SchemaVersion == 2 && state.SnapshotID == "" && state.SnapshotUpperBound == 0 && state.Cursor == "" && len(state.PageTargets) == 0 && len(state.PageDates) == 0 && len(state.Dates) == 0 && len(state.PageFound) == 0 && len(state.PageMissingIDs) == 0 && state.Processed == 0 && state.Missing == 0 && len(state.MissingSessionIDs) == 0 && state.LastSuccessfulAt == ""
+// discardHistoricalImportState deletes only the checkpoint that failed
+// authorization; a newer authorized run wins.
+func (p *plugin) discardHistoricalImportState(ctx context.Context, workspace string, state historicalImportState) {
+	p.importStateMu.Lock()
+	defer p.importStateMu.Unlock()
+	current, exists, err := p.loadHistoricalImportState(ctx, workspace)
+	if err != nil {
+		return
+	}
+	if exists && (current.RunID != state.RunID || current.SnapshotID != state.SnapshotID) {
+		return
+	}
+	if p.importRevoked == nil {
+		p.importRevoked = make(map[string]bool)
+	}
+	p.importRevoked[stableUsageID(workspace, state.RunID)] = true
+	if err := p.Host().DeleteState(ctx, importStateScope, workspace, importStateKey); err != nil {
+		log.Printf("session-cost historical import discard: %v", err)
+	}
 }
 
 type historicalImportView struct {
-	WorkspaceID         string `json:"workspace_id"`
-	Status              string `json:"status"`
-	Processed           int    `json:"processed"`
-	Missing             int    `json:"missing"`
-	DiagnosticsReliable bool   `json:"diagnostics_reliable"`
-	LegacyDiagnostics   bool   `json:"legacy_diagnostics,omitempty"`
-	LastError           string `json:"last_error,omitempty"`
-	LastSuccessfulAt    string `json:"last_successful_at,omitempty"`
-	Undated             bool   `json:"undated"`
+	WorkspaceID      string `json:"workspace_id"`
+	Status           string `json:"status"`
+	Phase            string `json:"phase"`
+	SessionsFound    int    `json:"sessions_found"`
+	SessionsImported int    `json:"sessions_imported"`
+	SessionsMissing  int    `json:"sessions_missing"`
+	SessionsSkipped  int    `json:"sessions_skipped"`
+	DaysTotal        int    `json:"days_total"`
+	DaysDone         int    `json:"days_done"`
+	CurrentDay       string `json:"current_day"`
+	ETASeconds       int64  `json:"eta_seconds,omitempty"`
+	LastSuccessfulAt string `json:"last_successful_at"`
+	Undated          bool   `json:"undated"`
+	LastError        string `json:"last_error"`
 }
 
 func publicImportView(state historicalImportState) historicalImportView {
-	view := historicalImportView{WorkspaceID: state.WorkspaceID, Status: state.Status, Processed: state.Processed, Missing: state.Missing, DiagnosticsReliable: state.DiagnosticsReliable, LegacyDiagnostics: state.LegacyDiagnostics, LastSuccessfulAt: state.LastSuccessfulAt, Undated: state.Undated}
+	view := historicalImportView{
+		WorkspaceID:      state.WorkspaceID,
+		Status:           state.Status,
+		Phase:            state.Phase,
+		SessionsFound:    state.SessionsFound,
+		SessionsImported: state.SessionsImported,
+		SessionsMissing:  state.SessionsMissing,
+		SessionsSkipped:  state.SessionsSkipped,
+		DaysTotal:        state.DaysTotal,
+		DaysDone:         state.DaysDone,
+		LastSuccessfulAt: state.LastSuccessfulAt,
+		Undated:          state.Undated,
+	}
+	if state.Phase == importPhaseDaily {
+		view.CurrentDay = state.NextDay
+	}
 	if state.LastError != "" {
-		view.LastError = "historical import failed; check collection compatibility and source availability"
+		view.LastError = historicalImportFailureMessage
+	}
+	if eta, ok := importETASeconds(state); ok {
+		view.ETASeconds = eta
 	}
 	return view
 }

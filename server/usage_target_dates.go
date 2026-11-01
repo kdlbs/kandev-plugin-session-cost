@@ -9,6 +9,32 @@ import (
 // Session milestones include their endpoint day. Source coverage is half-open.
 // Both endpoints must be known; neither collection time nor a deleted task ID
 // supplies a missing bound.
+// importTargetDateRange bounds the days an import requests. It extends a known
+// start with no end to today so an open eligible session still receives daily
+// history. The range only selects source days; saved amounts still come from
+// tokscale rows. Trusted current-target lookups keep using
+// trustedTargetDateRange without this extension.
+func importTargetDateRange(target pluginsdk.UsageCollectionTargetV1, today string) []string {
+	if dates := trustedTargetDateRange(target); len(dates) > 0 {
+		return dates
+	}
+	if !eligibleUsageSource(target) || target.SessionStartedAt == nil || target.SessionEndedAt != nil || target.CoverageEnd != nil || today == "" {
+		return nil
+	}
+	start := parseSessionTime(*target.SessionStartedAt)
+	if start.IsZero() {
+		return nil
+	}
+	first, last := collectionDate(start), today
+	if first > last {
+		return nil
+	}
+	if first == last {
+		return []string{first}
+	}
+	return []string{first, last}
+}
+
 func trustedTargetDateRange(target pluginsdk.UsageCollectionTargetV1) []string {
 	if !eligibleUsageSource(target) {
 		return nil

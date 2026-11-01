@@ -30,6 +30,7 @@ var TRANSLATIONS = {
     usageAccessDenied: "Saved usage is no longer accessible.",
     sourceContextUnavailable: "Source usage is unavailable for this retained scope. Saved usage remains authoritative.",
     sourceContextPreparing: "Source eligibility is preparing. Saved usage remains authoritative.",
+    sourceIneligible: "Cost can't be attributed safely for this session because its transcript may include other work. Saved usage stays available.",
     sourceMembershipChanged: "Source model groups changed. Saved usage is preserved. Restore the previous source grouping and refresh.",
     importPreparing: "Preparing historical source metadata.",
     estimatedCost: "Estimated cost",
@@ -79,6 +80,7 @@ var TRANSLATIONS = {
     usageAccessDenied: "A utilização guardada já não está acessível.",
     sourceContextUnavailable: "A utilização da origem não está disponível para este âmbito guardado. A utilização guardada mantém-se como referência.",
     sourceContextPreparing: "A elegibilidade da origem está a ser preparada. A utilização guardada mantém-se como referência.",
+    sourceIneligible: "O custo não pode ser atribuído com segurança a esta sessão porque a transcrição pode incluir outro trabalho. A utilização guardada continua disponível.",
     sourceMembershipChanged: "Os grupos de modelos da origem mudaram. A utilização guardada é preservada. Reponha o agrupamento anterior e atualize.",
     importPreparing: "A preparar os metadados das origens do histórico.",
     estimatedCost: "Custo estimado",
@@ -487,7 +489,8 @@ function tooltipBody(h, ui, state, t) {
       ? translate(t, "updateFailed")
       : translate(t, reportErrorKey);
   }
-  if (d && d.compatibility === "upgrade_required") status = translate(t, "usageUpgrade");
+  if (d && d.report_error === "source_ineligible") status = translate(t, "sourceIneligible");
+  else if (d && d.compatibility === "upgrade_required") status = translate(t, "usageUpgrade");
   else if (d && d.compatibility === "source_context_unavailable") status = translate(t, "sourceContextUnavailable");
   else if (d && d.compatibility === "source_context_preparing") status = translate(t, "sourceContextPreparing");
   else if (d && d.compatibility === "source_membership_ambiguous") status = translate(t, "sourceMembershipChanged");
@@ -1032,23 +1035,75 @@ var IMPORT_TRANSLATIONS = {
     importWorkspace: "Workspace",
     importNoWorkspace: "No workspace is available.",
     importNotStarted: "History has not been imported.",
-    importRunning: "Import is running.",
-    importPreparing: "Preparing historical source metadata.",
-    importCompleted: "Import completed.",
-    importFailed: "Import failed.",
+    importPreparing: "Preparing session metadata...",
+    importQueued: "Waiting for another import to finish.",
+    importStepOne: "Step 1 of 2: Reading all-time totals",
+    importStepTwo: "Step 2 of 2: Adding daily history",
+    importCompletedSummary: "Imported {{imported}} of {{found}} sessions.",
+    importFailed: "Import stopped on {{day}}.",
+    importFailedGeneric: "Import stopped.",
+    importFailedHint: "Check tokscale and try again.",
     importCancelled: "Import was cancelled.",
-    importDisabled: "Enable statistics collection before importing history.",
+    importDisabled: "Enable statistics collection to import.",
     importUnsupported: "Upgrade Kandev to import retained usage.",
-    importLegacyDiagnostics: "The previous import used unreliable missing-session diagnostics. Start a new import for exact counts.",
-    importProcessed: "Processed {{count}} sessions",
-    importMissing: "{{count}} sessions have no matching tokscale usage.",
+    importDayProgress: "{{done}} of {{total}} days",
+    importWorkingDay: "Working on {{day}}",
+    importEta: "About {{duration}} left",
+    importUnitSecond: "sec",
+    importUnitMinute: "min",
+    importUnitHour: "h",
+    importAllTimeReady: "All-time totals are ready. Charts fill in as days finish.",
+    importLeavePage: "You can leave this page.",
+    importSessionsFound: "Sessions found",
+    importSessionsImported: "Imported",
+    importSessionsMissing: "No local transcript",
+    importSessionsSkipped: "Skipped (not safe)",
+    importLastSuccessful: "Last imported {{value}}",
     importUndated: "Some lifetime usage has no source date and stays outside dated charts.",
-    importLastSuccessful: "Last successful pass: {{value}}",
     importStart: "Import history",
+    importResume: "Resume",
     importAgain: "Import again",
     importCancel: "Cancel import",
     importWorking: "Working...",
     importError: "Could not read import status: {{message}}",
+  },
+  "pt-pt": {
+    importTitle: "Importar utilização histórica",
+    importDescription: "Lê sessões locais existentes do tokscale para a página Token Usage.",
+    importWorkspace: "Workspace",
+    importNoWorkspace: "Não existe nenhum workspace disponível.",
+    importNotStarted: "O histórico ainda não foi importado.",
+    importPreparing: "A preparar os metadados das sessões...",
+    importQueued: "A aguardar que outra importação termine.",
+    importStepOne: "Passo 1 de 2: Ler os totais de sempre",
+    importStepTwo: "Passo 2 de 2: Adicionar o histórico diário",
+    importCompletedSummary: "Importadas {{imported}} de {{found}} sessões.",
+    importFailed: "A importação parou em {{day}}.",
+    importFailedGeneric: "A importação parou.",
+    importFailedHint: "Verifique o tokscale e tente novamente.",
+    importCancelled: "A importação foi cancelada.",
+    importDisabled: "Ative a recolha de estatísticas para importar.",
+    importUnsupported: "Atualize o Kandev para importar utilização retida.",
+    importDayProgress: "{{done}} de {{total}} dias",
+    importWorkingDay: "A processar {{day}}",
+    importEta: "Faltam cerca de {{duration}}",
+    importUnitSecond: "seg",
+    importUnitMinute: "min",
+    importUnitHour: "h",
+    importAllTimeReady: "Os totais de sempre estão prontos. Os gráficos preenchem-se à medida que os dias terminam.",
+    importLeavePage: "Pode sair desta página.",
+    importSessionsFound: "Sessões encontradas",
+    importSessionsImported: "Importadas",
+    importSessionsMissing: "Sem transcrição local",
+    importSessionsSkipped: "Ignoradas (não seguras)",
+    importLastSuccessful: "Última importação {{value}}",
+    importUndated: "Alguma utilização de sempre não tem data de origem e fica fora dos gráficos datados.",
+    importStart: "Importar histórico",
+    importResume: "Retomar",
+    importAgain: "Importar novamente",
+    importCancel: "Cancelar importação",
+    importWorking: "A processar...",
+    importError: "Não foi possível ler o estado da importação: {{message}}",
   },
 };
 
@@ -1056,12 +1111,14 @@ function importStatusKey(status) {
   switch (status) {
     case "preparing":
       return "importPreparing";
+    case "queued":
+      return "importQueued";
     case "running":
-      return "importRunning";
+      return "importStepOne";
     case "completed":
-      return "importCompleted";
+      return "importCompletedSummary";
     case "failed":
-      return "importFailed";
+      return "importFailedGeneric";
     case "cancelled":
       return "importCancelled";
     case "disabled":
@@ -1071,6 +1128,15 @@ function importStatusKey(status) {
     default:
       return "importNotStarted";
   }
+}
+
+function importDuration(t, seconds) {
+  if (typeof seconds !== "number" || !isFinite(seconds) || seconds <= 0) return "";
+  if (seconds < 90) return Math.max(1, Math.round(seconds)) + " " + importTranslation(t, "importUnitSecond");
+  var minutes = Math.round(seconds / 60);
+  if (minutes < 90) return minutes + " " + importTranslation(t, "importUnitMinute");
+  var hours = Math.round(minutes / 60);
+  return hours + " " + importTranslation(t, "importUnitHour");
 }
 
 function importTranslation(t, key, values) {
@@ -1157,7 +1223,7 @@ function makeHistoricalImportSettings(host) {
             if (cancelled) return;
             setStatus(next || null);
             setLoading(false);
-            if (next && (next.status === "running" || next.status === "preparing")) {
+            if (next && (next.status === "running" || next.status === "preparing" || next.status === "queued")) {
               timer = setTimeout(function () { setPoll(function (value) { return value + 1; }); }, 2000);
             }
           })
@@ -1190,12 +1256,40 @@ function makeHistoricalImportSettings(host) {
         .then(function () { setBusy(false); });
     }
 
-    var running = Boolean(status && (status.status === "running" || status.status === "preparing"));
-    var statusMessage = status
-      ? importTranslation(t, importStatusKey(status.status))
-      : importTranslation(t, "importNotStarted");
-    var processed = status && typeof status.processed === "number" ? status.processed : 0;
-    var missing = status && typeof status.missing === "number" ? status.missing : 0;
+    var active = Boolean(status && (status.status === "running" || status.status === "preparing" || status.status === "queued"));
+    var daily = Boolean(status && status.status === "running" && status.phase === "daily");
+    var daysDone = status && typeof status.days_done === "number" ? status.days_done : 0;
+    var daysTotal = status && typeof status.days_total === "number" ? status.days_total : 0;
+    var sessionsFound = status && typeof status.sessions_found === "number" ? status.sessions_found : 0;
+    var sessionsImported = status && typeof status.sessions_imported === "number" ? status.sessions_imported : 0;
+    var sessionsMissing = status && typeof status.sessions_missing === "number" ? status.sessions_missing : 0;
+    var sessionsSkipped = status && typeof status.sessions_skipped === "number" ? status.sessions_skipped : 0;
+    var statusMessage = importTranslation(t, importStatusKey(status && status.status));
+    if (status && status.status === "running" && daily) {
+      statusMessage = importTranslation(t, "importStepTwo");
+    }
+    if (status && status.status === "completed") {
+      statusMessage = importTranslation(t, "importCompletedSummary", { imported: sessionsImported, found: sessionsFound });
+    }
+    if (status && status.status === "failed") {
+      statusMessage = status.current_day
+        ? importTranslation(t, "importFailed", { day: status.current_day })
+        : importTranslation(t, "importFailedGeneric");
+    }
+    var showCounts = Boolean(status && status.status !== "unsupported" && (sessionsFound > 0 || sessionsImported > 0 || status.status === "completed"));
+    var progressLabel = importTranslation(t, "importDayProgress", { done: daysDone, total: daysTotal });
+    var progressPercent = daysTotal > 0 ? Math.max(0, Math.min(100, Math.round((daysDone / daysTotal) * 100))) : 0;
+    var eta = status && typeof status.eta_seconds === "number" ? importDuration(t, status.eta_seconds) : "";
+    var action = null;
+    if (status && status.status === "unsupported") {
+      action = null;
+    } else if (active) {
+      action = h(Button, { type: "button", variant: "outline", size: "sm", className: "min-h-11 w-full cursor-pointer md:w-auto", disabled: busy, onClick: function () { runAction("historical-import-cancel"); } }, importTranslation(t, "importCancel"));
+    } else if (status && (status.status === "failed" || status.status === "disabled")) {
+      action = h(Button, { type: "button", variant: "outline", size: "sm", className: "min-h-11 w-full cursor-pointer md:w-auto", disabled: busy || !workspaceId, onClick: function () { runAction("historical-import-start"); } }, importTranslation(t, "importResume"));
+    } else {
+      action = h(Button, { type: "button", variant: "outline", size: "sm", className: "min-h-11 w-full cursor-pointer md:w-auto", disabled: busy || !workspaceId, onClick: function () { runAction("historical-import-start"); } }, importTranslation(t, status && (status.status === "completed" || status.status === "cancelled") ? "importAgain" : "importStart"));
+    }
     var children = [
       h(CardHeader, { key: "header" },
         h(CardTitle, null, importTranslation(t, "importTitle")),
@@ -1213,20 +1307,45 @@ function makeHistoricalImportSettings(host) {
           : workspaceId
             ? h("div", { style: { fontSize: "12px", opacity: 0.7 } }, importTranslation(t, "importWorkspace") + ": " + workspaceId)
             : h("div", { style: { fontSize: "12px", opacity: 0.7 } }, importTranslation(t, "importNoWorkspace")),
-        loading
-          ? h("div", { style: { display: "flex", alignItems: "center", gap: "7px", fontSize: "12px", opacity: 0.7 } },
-              Spinner ? h(Spinner, { style: { width: "14px", height: "14px" } }) : null,
-              importTranslation(t, "importWorking"))
-          : h("div", { style: { fontSize: "13px" } }, statusMessage),
-        running && Progress ? h(Progress, { "aria-label": statusMessage }) : null,
-        status && status.status !== "not_started" && status.status !== "preparing"
+        h("div", { role: "status", "aria-live": "polite", style: { display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px" } },
+          h("span", null, statusMessage),
+          loading && !status
+            ? h("span", { style: { display: "flex", alignItems: "center", gap: "7px", fontSize: "12px", opacity: 0.7 } },
+                Spinner ? h(Spinner, { style: { width: "14px", height: "14px" } }) : null,
+                importTranslation(t, "importWorking"))
+            : null,
+          daily
+            ? h("span", { style: { fontSize: "12px", opacity: 0.8 } },
+                importTranslation(t, "importWorkingDay", { day: status.current_day || "-" }) + (eta ? " - " + importTranslation(t, "importEta", { duration: eta }) : ""))
+            : null),
+        daily && Progress
+          ? h(Progress, { value: progressPercent, max: 100, "aria-label": progressLabel, "aria-valuetext": progressLabel })
+          : active && Progress
+            ? h(Progress, { "aria-label": statusMessage })
+            : null,
+        daily
+          ? h("div", { style: { fontSize: "12px", opacity: 0.75 } }, progressLabel)
+          : null,
+        showCounts
+          ? h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "6px 12px", fontSize: "12px", opacity: 0.8 } },
+              h("span", null, importTranslation(t, "importSessionsFound") + ": " + sessionsFound),
+              h("span", null, importTranslation(t, "importSessionsImported") + ": " + sessionsImported),
+              h("span", null, importTranslation(t, "importSessionsMissing") + ": " + sessionsMissing),
+              h("span", null, importTranslation(t, "importSessionsSkipped") + ": " + sessionsSkipped))
+          : null,
+        daily
           ? h("div", { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px", opacity: 0.75 } },
-              h("span", null, importTranslation(t, "importProcessed", { count: processed })),
-              status.diagnostics_reliable === false ? h("span", null, importTranslation(t, "importLegacyDiagnostics")) : missing > 0 ? h("span", null, importTranslation(t, "importMissing", { count: missing })) : null,
+              h("span", null, importTranslation(t, "importAllTimeReady")),
+              h("span", null, importTranslation(t, "importLeavePage")),
               status.last_successful_at
                 ? h("span", null, importTranslation(t, "importLastSuccessful", { value: status.last_successful_at }))
                 : null,
               status.undated ? h("span", null, importTranslation(t, "importUndated")) : null)
+          : status && status.last_successful_at
+            ? h("div", { style: { fontSize: "12px", opacity: 0.75 } }, importTranslation(t, "importLastSuccessful", { value: status.last_successful_at }))
+            : null,
+        status && status.status === "failed"
+          ? h("div", { style: { fontSize: "12px", opacity: 0.75 } }, importTranslation(t, "importFailedHint"))
           : null,
         status && status.last_error
           ? h("div", { style: { color: COLOR.red, fontSize: "12px" } }, status.last_error)
@@ -1234,10 +1353,7 @@ function makeHistoricalImportSettings(host) {
         error
           ? h("div", { style: { color: COLOR.red, fontSize: "12px" } }, importTranslation(t, "importError", { message: error }))
           : null,
-        h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px" } },
-          running
-            ? h(Button, { type: "button", variant: "outline", size: "sm", className: "min-h-11 cursor-pointer", disabled: busy, onClick: function () { runAction("historical-import-cancel"); } }, importTranslation(t, "importCancel"))
-            : h(Button, { type: "button", variant: "outline", size: "sm", className: "min-h-11 cursor-pointer", disabled: busy || !workspaceId, onClick: function () { runAction("historical-import-start"); } }, importTranslation(t, status && status.status === "completed" ? "importAgain" : "importStart")))
+        h("div", { style: { display: "flex", flexWrap: "wrap", gap: "8px" } }, action)
       ),
     ];
     return h(Card, { "data-plugin": "kandev-session-cost", "data-testid": "historical-import-settings" }, children);
