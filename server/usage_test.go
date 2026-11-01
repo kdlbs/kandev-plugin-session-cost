@@ -26,6 +26,10 @@ func (r *usageRecordingReader) List(ctx context.Context, filter pluginsdk.Sessio
 	return r.list(ctx, filter, page)
 }
 
+func (r *usageRecordingReader) UpsertBatch(context.Context, string, []pluginsdk.SessionUsageMeasurement) ([]pluginsdk.SessionUsageWriteResult, error) {
+	return nil, errors.New("legacy usage writes are not used")
+}
+
 func (r *usageRecordingReader) list(_ context.Context, filter pluginsdk.SessionUsageFilter, page pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -76,6 +80,8 @@ type usageRecordingHost struct {
 	*fakeHost
 	usage *usageRecordingReader
 }
+
+var _ pluginsdk.UsageReader = (*usageRecordingReader)(nil)
 
 func (h *usageRecordingHost) Usage() pluginsdk.UsageReader { return h.usage }
 
