@@ -53,7 +53,7 @@
       "run": "desktop r9 retention",
       "result": "failed",
       "cause": "the empty Tokscale report correctly classified all processed targets as missing",
-      "assertion_change": "assert missing equals processed and do not claim imported records",
+      "assertion_change": "assert at least two processed targets and that missing equals processed; do not claim imported records",
       "automatic_retry": false,
       "original_log_name": "usage-history-luna-E6-managed-chromium-r9.log",
       "raw_log_retained": false

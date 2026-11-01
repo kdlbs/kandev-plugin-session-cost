@@ -63,14 +63,19 @@ API. English is the fallback; Portuguese (Portugal) is also included.
 
 ## Current verification (2026-11-01)
 
-`make test` passed with the Go suite and 75 Node tests. Bundle syntax, package
+`make test` passed with the Go suite and 76 Node tests. Bundle syntax, package
 checks, release-version checks, formatting, vet, and `go mod tidy -diff` passed.
-The Linux amd64 package passed manifest, file-list, and hash checks.
+The Linux amd64 package passed manifest, file-list, and hash checks. Its SHA-256
+is `5081dd2b4cbe6e2bafb2d62c2a3245276f43756f2cdc157590c3c847c064656d`.
 
-The installed-package smoke ran on a disposable Host with retries disabled.
-Chromium passed four tests. Mobile Chrome passed three tests. The tests cover
-historical imports, import queueing and restart recovery, desktop and mobile
-actions, retained usage after deletion, and authenticated usage.
+The installed-package smoke ran on a clean Host build from core commit
+`cc1a2cf7182d47b35d37aacc94982d4d2e9f61aa`. The Host reported
+`v0.98.0-274-gcc1a2cf7182`; its binary SHA-256 is
+`db1c82ad16453e2b3b613585d3621c894bd771ce1e02bc0018a20eaea693bc43`. Retries
+were disabled. Chromium passed four tests. Mobile Chrome passed three tests.
+The tests cover historical imports, import queueing and restart recovery,
+desktop and mobile actions, retained usage after deletion, and authenticated
+usage.
 
 The historical-import smoke used a non-empty synthetic report. It imported
 1,620 tokens and 4,200 cost subcents. The report also covered an unsafe-session

@@ -1,10 +1,10 @@
 {
-  "scope": "current-pr-head",
+  "scope": "current-pr-source",
   "date": "2026-11-01",
-  "plugin_source_commit": "0d7fc8c91d80ea08083fc761562e4c77357f5b88",
-  "host_source_commit": "c2abc61889481e89a204fcc9cb941abc7fa7372d",
+  "plugin_source_commit": "0cb3ee73cc68782272976af34f486bc970995616",
+  "host_source_commit": "cc1a2cf7182d47b35d37aacc94982d4d2e9f61aa",
   "sdk_pin": "9a751dd7d88a12307ee3a23130651cb6a0b8f2d3",
-  "package_sha256": "422556a16edaefc82881a01ae8978528b7001b8982581bf15fc9fa2bc342d2ad",
+  "package_sha256": "5081dd2b4cbe6e2bafb2d62c2a3245276f43756f2cdc157590c3c847c064656d",
   "retry_policy": "Playwright retries were disabled. Each project used one worker.",
   "browser_runs": [
     {
@@ -12,14 +12,23 @@
       "result": "passed",
       "tests": 4,
       "duration": "2.1m",
-      "test_durations_seconds": [29.3, 23.9, 48.5, 20.8]
+      "test_durations_seconds": [
+        29.6,
+        23.5,
+        48.9,
+        19.9
+      ]
     },
     {
       "project": "mobile-chrome",
       "result": "passed",
       "tests": 3,
       "duration": "1.7m",
-      "test_durations_seconds": [28.6, 28.6, 45.0]
+      "test_durations_seconds": [
+        28.3,
+        28.5,
+        43.3
+      ]
     }
   ],
   "historical_import": {
@@ -32,10 +41,12 @@
   },
   "retained_output": "playwright-results.log",
   "raw_runner_logs_retained": false,
-  "raw_log_note": "The raw runner output included temporary workspace paths and ephemeral identifiers. The retained log records sanitized test names, results, and durations.",
+  "raw_log_note": "The runner output included temporary workspace paths and ephemeral identifiers. The retained log records sanitized test names, results, and durations.",
   "limitations": [
     "The package verification covered the Linux amd64 host package.",
     "This evidence does not establish a minimum Host release.",
     "The full-scale PostgreSQL and zero-FLAKY gates remain separate."
-  ]
+  ],
+  "host_reported_version": "v0.98.0-274-gcc1a2cf7182",
+  "host_binary_sha256": "db1c82ad16453e2b3b613585d3621c894bd771ce1e02bc0018a20eaea693bc43"
 }
