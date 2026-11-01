@@ -38,5 +38,53 @@
     "The E6 archive was not rebuilt from the then-current plugin head.",
     "E6 used an empty tokscale report, so it did not prove successful non-empty import.",
     "E6 does not describe or verify the current PR head."
-  ]
+  ],
+  "intermediate_attempts": [
+    {
+      "run": "desktop r7 initial retention attempt",
+      "result": "failed",
+      "cause": "wire token counts were decimal strings, but the fixture expected JavaScript numbers",
+      "assertion_change": "expect decimal strings from the Host DTO",
+      "automatic_retry": false,
+      "original_log_name": "usage-history-luna-E6-managed-chromium-r7.log",
+      "raw_log_retained": false
+    },
+    {
+      "run": "desktop r9 retention",
+      "result": "failed",
+      "cause": "the empty Tokscale report correctly classified all processed targets as missing",
+      "assertion_change": "assert missing equals processed and do not claim imported records",
+      "automatic_retry": false,
+      "original_log_name": "usage-history-luna-E6-managed-chromium-r9.log",
+      "raw_log_retained": false
+    },
+    {
+      "run": "desktop r10 retention",
+      "result": "failed",
+      "cause": "uninstall inspection found one fixture-owned source row",
+      "assertion_change": "assert the fixture-owned reported-native-cost row and exact version and cost",
+      "automatic_retry": false,
+      "original_log_name": "usage-history-luna-E6-managed-chromium-r10.log",
+      "raw_log_retained": false
+    },
+    {
+      "run": "desktop r11 retention",
+      "result": "failed",
+      "cause": "the delivery smoke creates a second task and session, so two unavailable session rows were present",
+      "assertion_change": "assert both rows and the aggregate 300 tokens and 0.24 USD",
+      "automatic_retry": false,
+      "original_log_name": "usage-history-luna-E6-managed-chromium-r11.log",
+      "raw_log_retained": false
+    },
+    {
+      "run": "phone r1 retention",
+      "result": "failed",
+      "cause": "an extra eligible target made processed and missing counts three, not two",
+      "assertion_change": "assert missing equals processed",
+      "automatic_retry": false,
+      "original_log_name": "usage-history-luna-E6-managed-mobile-r1.log",
+      "raw_log_retained": false
+    }
+  ],
+  "older_host_log_retention": "Original older-Host browser and build logs were temporary and intentionally not retained. Their basenames and test/build summaries are preserved in verification.json; no unavailable raw-log hashes are claimed."
 }

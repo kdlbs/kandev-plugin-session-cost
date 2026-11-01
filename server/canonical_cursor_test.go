@@ -413,10 +413,31 @@ func TestUsageHistoryInvalidCanonicalCursorFailsInsteadOfStayingPending(t *testi
 			require.NoError(t, err)
 			require.True(t, found)
 			require.Equal(t, reportStateFailed, response.ReportState)
-			require.Equal(t, reportErrorUnavailable, response.ReportError)
+			require.Equal(t, "invalid_publication", response.ReportError)
 			require.False(t, response.CanonicalPending)
+			require.True(t, savedUsageReadOnly(response), "an invalid publication cannot be repaired by source work")
 			_, wantCalls := tc.reply(canonicalRPCRequest{}, 1)
 			require.Len(t, requests(), wantCalls)
+
+			var sourceCalls atomic.Int32
+			p.run = func(context.Context, string, ...string) ([]byte, error) {
+				sourceCalls.Add(1)
+				return []byte(`{"entries":[]}`), nil
+			}
+			refreshed, err := p.sessionUsage(context.Background(), "ws", "task-1", "session-1", true)
+			require.NoError(t, err)
+			require.Equal(t, "invalid_publication", refreshed.ReportError)
+			require.Zero(t, sourceCalls.Load(), "refresh must not start tokscale for an invalid publication")
+
+			actionRefresh, err := p.responsiveSessionUsage(context.Background(), "ws", "task-1", "session-1", true)
+			require.NoError(t, err)
+			require.Equal(t, "invalid_publication", actionRefresh.ReportError)
+			require.Zero(t, sourceCalls.Load(), "the composer refresh must not start tokscale for an invalid publication")
+
+			calculated := parsedUsage(t, `{"entries":[{"sessionId":"transcript-1","model":"m","input":999,"cost":9}]}`)
+			readback := p.canonicalUsageAfterWrite(context.Background(), "ws", "task-1", "session-1", calculated, nil, nil)
+			require.Equal(t, "invalid_publication", readback.ReportError)
+			require.True(t, savedUsageReadOnly(readback), "a write readback cannot replace an invalid canonical publication")
 		})
 	}
 }

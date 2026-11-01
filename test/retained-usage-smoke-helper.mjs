@@ -496,6 +496,7 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
     }, { timeout: 90_000, message: "Retained targets must remain importable after live task/session deletion, with the configured one-minute import budget" }).toBe("completed");
     expect(importState.sessions_found).toBeGreaterThanOrEqual(2);
     expect(importState.sessions_missing).toBeGreaterThanOrEqual(2);
+    expect(importState.sessions_imported).toBe(0);
     expect(importState.sessions_missing + importState.sessions_imported + importState.sessions_skipped)
       .toBe(importState.sessions_found);
     expect(importState).not.toHaveProperty("snapshot_id");

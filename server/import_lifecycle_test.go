@@ -10,6 +10,8 @@ import (
 
 	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // importLifecycleHost adds state-write fault injection while delegating every
@@ -76,6 +78,35 @@ func importStateOf(t *testing.T, p *plugin, workspace string) historicalImportSt
 	require.NoError(t, err)
 	require.True(t, found)
 	return state
+}
+
+func TestImportSnapshotStepKeepsCheckpointForTransientScopeErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		code codes.Code
+	}{
+		{name: "unauthenticated", code: codes.Unauthenticated},
+		{name: "invalid argument", code: codes.InvalidArgument},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := &importEngineFixture{pageSize: 10}
+			host := newImportLifecycleHost(fixture, true)
+			p := newImportLifecyclePlugin(t, host, fixture, false)
+			state := historicalImportState{
+				SchemaVersion: importSchemaVersion, Status: importStatusRunning,
+				RunID: "transient-run", Phase: importPhaseDaily,
+			}
+			require.NoError(t, p.writeHistoricalImportState(context.Background(), "ws", state, true))
+
+			err := status.Error(tc.code, "temporary Host response")
+			step := p.importSnapshotStep(context.Background(), "ws", &state, err)
+			require.True(t, step.done)
+			require.Equal(t, importStatusFailed, step.status)
+			require.ErrorIs(t, step.err, err)
+			require.Equal(t, "transient-run", importStateOf(t, p, "ws").RunID,
+				"transient authorization responses must keep the resumable checkpoint")
+		})
+	}
 }
 
 func TestImportLifecycleResumesRunningImportAfterRestart(t *testing.T) {

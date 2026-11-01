@@ -821,10 +821,9 @@ func (p *plugin) skipImportTarget(state *historicalImportState, entry *importTar
 	state.SessionsSkipped++
 }
 
-// importSnapshotStep discards a checkpoint whose captured scope is denied. Any
-// other scope error is a run failure that keeps the saved work.
+// importSnapshotStep discards a checkpoint only when its captured scope is invalidated.
 func (p *plugin) importSnapshotStep(ctx context.Context, workspaceID string, state *historicalImportState, err error) importStep {
-	if !errors.Is(err, errUsageScopeChanged) && !usageScopeDenied(err) {
+	if !invalidatesHistoricalImportScope(err) {
 		return importFinish(importFailureStatus(err), err)
 	}
 	p.discardHistoricalImportState(ctx, workspaceID, *state)

@@ -189,6 +189,20 @@ test("validates the persisted historical import queue namespace", (t) => {
   }
 });
 
+test("rejects impossible calendar dates in historical import intervals", (t) => {
+  for (const invalidDate of ["2026-02-31", "2025-02-29", "2026-04-31"]) {
+    const rows = safeRows();
+    rows.find((row) => row.stateKey === "historical-import").value.intervals[0].start = invalidDate;
+    const db = fixture(t, rows);
+
+    assert.throws(
+      () => inspectRetainedUsagePluginState({ tmpDir: db.tmpDir, databaseFilename: db.databaseFilename }),
+      /checkpoint contains an invalid date/,
+      invalidDate,
+    );
+  }
+});
+
 test("validates the persisted skipped flag on collector checkpoints", (t) => {
   const rows = safeRows();
   const collector = rows.find((row) => row.scopeId === "collector");

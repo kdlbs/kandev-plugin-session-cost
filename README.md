@@ -63,7 +63,7 @@ API. English is the fallback; Portuguese (Portugal) is also included.
 
 ## Current verification (2026-11-01)
 
-`make test` passed with the Go suite and 74 Node tests. Bundle syntax, package
+`make test` passed with the Go suite and 75 Node tests. Bundle syntax, package
 checks, release-version checks, formatting, vet, and `go mod tidy -diff` passed.
 The Linux amd64 package passed manifest, file-list, and hash checks.
 
@@ -278,10 +278,9 @@ Use Go 1.26 and Node.js 24. The Go module resolves the unpublished Kandev SDK
 from the sibling module at `../kandev/pluginsdk`. Package targets run
 `plugin-pack` from `../kandev/apps/backend` with that checkout's dependencies.
 
-Retained adapter development currently uses the coordinator's local SDK checkout.
-The immutable source pin above still selects the earlier baseline.
-The bootstrap commands below select that baseline, which lacks the new root module.
-The coordinator must supply the final core revision before CI or release checks can use this pin:
+The Go module uses the sibling checkout at `../kandev/pluginsdk`.
+Keep that checkout at the commit in `.kandev-sdk-ref` for local Go checks.
+GitHub workflows read the same file and use that exact SDK commit.
 
 
 ```sh

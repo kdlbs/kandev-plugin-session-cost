@@ -429,7 +429,8 @@ func (p *plugin) canonicalUsageAfterWrite(ctx context.Context, workspaceID, task
 		empty.CostKnown = false
 		canonical = &empty
 	}
-	if canonical.Compatibility == "upgrade_required" || canonical.ReportError == reportErrorInvalidQuery {
+	if canonical.Compatibility == "upgrade_required" || canonical.ReportError == reportErrorInvalidQuery ||
+		canonical.ReportError == reportErrorInvalidPublication {
 		return canonical
 	}
 	canonical.Stale = canonical.Stale || writeErr != nil || !found

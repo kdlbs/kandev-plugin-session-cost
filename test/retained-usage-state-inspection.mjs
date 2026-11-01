@@ -120,7 +120,10 @@ function assertNonnegativeInteger(value) {
 
 function assertDate(value) {
   assertString(value, { pattern: datePattern });
-  if (Number.isNaN(Date.parse(`${value}T00:00:00Z`))) fail("checkpoint contains an invalid date");
+  const timestamp = Date.parse(`${value}T00:00:00Z`);
+  if (Number.isNaN(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== value) {
+    fail("checkpoint contains an invalid date");
+  }
 }
 
 function assertTimestamp(value) {

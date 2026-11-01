@@ -12,12 +12,13 @@ import (
 )
 
 const (
-	maxCanonicalSnapshots   = 64
-	maxCanonicalRestarts    = 2
-	maxCanonicalPages       = 100
-	canonicalReadTimeout    = 3 * time.Second
-	reportErrorInvalidQuery = "invalid_query"
-	reportErrorAccessDenied = "access_denied"
+	maxCanonicalSnapshots         = 64
+	maxCanonicalRestarts          = 2
+	maxCanonicalPages             = 100
+	canonicalReadTimeout          = 3 * time.Second
+	reportErrorInvalidQuery       = "invalid_query"
+	reportErrorInvalidPublication = "invalid_publication"
+	reportErrorAccessDenied       = "access_denied"
 )
 
 var errCanonicalPublicationInvalid = errors.New("canonical usage publication is invalid")
@@ -188,6 +189,7 @@ func (p *plugin) loadSavedSessionUsage(ctx context.Context, workspaceID, taskID,
 	}
 	if errors.Is(err, errCanonicalPublicationInvalid) {
 		response := p.canonicalReadFailure(sessionID, warn, high)
+		response.ReportError = reportErrorInvalidPublication
 		response.Error = "Kandev returned an invalid canonical usage page sequence"
 		return response, true, nil
 	}
@@ -237,7 +239,8 @@ func (p *plugin) canonicalReadFailure(sessionID string, warn, high float64) *ses
 // A database read that is preparing, unsupported, or invalid cannot be
 // repaired by starting a source process, including on an explicit refresh.
 func savedUsageReadOnly(response *sessionCostResponse) bool {
-	return response != nil && (response.CanonicalPending || response.Compatibility == "upgrade_required" || response.ReportError == reportErrorInvalidQuery)
+	return response != nil && (response.CanonicalPending || response.Compatibility == "upgrade_required" ||
+		response.ReportError == reportErrorInvalidQuery || response.ReportError == reportErrorInvalidPublication)
 }
 
 func canonicalAccessStatus(err error) int {

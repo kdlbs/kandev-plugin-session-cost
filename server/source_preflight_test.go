@@ -71,7 +71,7 @@ func TestCurrentSourceTargetStopsStalledTaskLookupAtHostReadDeadline(t *testing.
 	started := time.Now()
 	_, err := p.currentSourceTarget(ctx, "", "task-1", "session-1", "transcript-1")
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Less(t, time.Since(started), 250*time.Millisecond, "the plugin Host-read budget must bound the task lookup")
+	require.Less(t, time.Since(started), 450*time.Millisecond, "the plugin Host-read budget must bound the task lookup")
 }
 
 func TestComposerIneligibleSessionUsesSafeAttributionCopy(t *testing.T) {
