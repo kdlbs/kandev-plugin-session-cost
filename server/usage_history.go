@@ -18,7 +18,7 @@ import (
 
 var errUsageCollectionDisabled = errors.New("token statistics collection is disabled")
 
-var errUsageHistoryUnsupported = errors.New("upgrade Kandev to a host that supports retained usage collection")
+var errUsageHistoryUnsupported = errors.New("retained usage is unavailable; update Kandev or turn on the usage history toggle")
 
 var errUsageSourceUnavailable = errors.New("the Host has not authorized this aggregate source context")
 

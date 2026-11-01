@@ -121,11 +121,12 @@ func TestComposerTransientHostFailureKeepsGenericSourceContextCopy(t *testing.T)
 	require.Equal(t, "source_context_unavailable", response.Compatibility)
 }
 
-func TestComposerUnsupportedHostStillAsksForUpgrade(t *testing.T) {
+func TestComposerUnsupportedHostNamesUpgradeAndToggleRemedies(t *testing.T) {
 	response := newPlugin().unavailableSource(nil, "session-1", 1, 10, errUsageHistoryUnsupported)
 	require.Equal(t, reportStateFailed, response.ReportState)
 	require.Equal(t, reportErrorUnavailable, response.ReportError)
 	require.Equal(t, "upgrade_required", response.Compatibility)
+	require.Equal(t, "retained usage is unavailable; update Kandev or turn on the usage history toggle", response.Error)
 }
 
 func TestComposerSynchronousPathPreservesIneligibleClassification(t *testing.T) {

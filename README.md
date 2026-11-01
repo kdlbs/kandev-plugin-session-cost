@@ -122,7 +122,8 @@ Historical import requires a Host with the retained usage-history interface.
 Import requires statistics collection to be enabled; disabling it during a run
 stops the import with a resumable disabled state. A Host with the
 `features.usageHistory` release toggle off reports the retained interface as
-unsupported, so the card asks for an upgrade rather than importing.
+unsupported. The card tells users to update Kandev or turn on Usage history in
+Settings > System > Feature Toggles.
 
 ### Host trust and action scope
 

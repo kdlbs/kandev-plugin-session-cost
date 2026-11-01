@@ -396,6 +396,22 @@ test("new hosts render one localized Action without plugin shell styles", async 
   assert.equal(view.refresh().props["aria-label"], "Atualizar o custo da sessão");
 });
 
+test("unsupported usage guidance names both remedies in every locale", () => {
+  const translations = createActionHarness({ action: true, locale: "en" }).translations();
+  const remedies = {
+    en: ["Update Kandev", "turn on Usage history in Settings > System > Feature Toggles"],
+    "pt-pt": ["Atualize o Kandev", "ative o Histórico de utilização em Definições > Sistema > Interruptores de funcionalidades"],
+  };
+
+  for (const [locale, phrases] of Object.entries(remedies)) {
+    for (const key of ["usageUpgrade", "importUnsupported"]) {
+      for (const phrase of phrases) {
+        assert.ok(translations[locale][key].includes(phrase), `${locale}.${key} is missing ${phrase}`);
+      }
+    }
+  }
+});
+
 test("older-host mobile fallback keeps a touch target and lets loaded cost content set its width", async () => {
   const view = createActionHarness({ presentation: "mobile" });
   const trigger = view.trigger();
@@ -784,7 +800,7 @@ test("unsupported retained hosts preserve saved costs and show upgrade guidance"
   view.requests[0].resolve(costResponse({ saved: true, compatibility: "upgrade_required" }));
   await flushPromises();
   assert.match(view.text(), /\$1.00/);
-  assert.match(view.text(), /Upgrade Kandev to save retained usage/);
+  assert.match(view.text(), /Update Kandev, or turn on Usage history in Settings > System > Feature Toggles/);
 });
 
 test("failed import shows the stopped day and offers Resume", async () => {
