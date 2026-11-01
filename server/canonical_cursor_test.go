@@ -392,6 +392,35 @@ func TestUsageHistoryCanonicalCursorRPCBoundsDistinctPages(t *testing.T) {
 	require.Len(t, requests(), 100)
 }
 
+func TestUsageHistoryInvalidCanonicalCursorFailsInsteadOfStayingPending(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply func(canonicalRPCRequest, int) (*pluginsdk.PageInfo, int)
+	}{
+		{name: "repeated cursor", reply: func(_ canonicalRPCRequest, _ int) (*pluginsdk.PageInfo, int) {
+			return canonicalReadyPage("published.1", "usage-v1.repeated"), 2
+		}},
+		{name: "page cap", reply: func(_ canonicalRPCRequest, n int) (*pluginsdk.PageInfo, int) {
+			return canonicalReadyPage("published.1", fmt.Sprintf("usage-v1.page-%d", n+1)), maxCanonicalPages
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, requests := canonicalRPCFixture(t, func(_ context.Context, request canonicalRPCRequest, n int) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
+				info, _ := tc.reply(request, n)
+				return canonicalFixture(999), info, nil
+			})
+			response, found, err := p.loadSavedSessionUsage(context.Background(), "ws", "task-1", "session-1", 1, 10)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, reportStateFailed, response.ReportState)
+			require.Equal(t, reportErrorUnavailable, response.ReportError)
+			require.False(t, response.CanonicalPending)
+			_, wantCalls := tc.reply(canonicalRPCRequest{}, 1)
+			require.Len(t, requests(), wantCalls)
+		})
+	}
+}
+
 func TestUsageHistoryCanonicalCursorRPCPublishedPendingPagesSurviveRestart(t *testing.T) {
 	const cursor = "usage-v1.published-pending"
 	p, requests := canonicalRPCFixture(t, func(_ context.Context, request canonicalRPCRequest, _ int) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {

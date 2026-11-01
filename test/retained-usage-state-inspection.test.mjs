@@ -55,27 +55,27 @@ function fixture(t, records = [], databaseFilename = SESSION_COST_DEFAULT_DATABA
 function safeRows() {
   const importState = {
     run_id: "run-opaque-123",
-    schema_version: 2,
-    diagnostics_reliable: true,
+    schema_version: 3,
     snapshot_id: "snapshot-opaque-123",
     snapshot_upper_bound: "1200",
-    page_targets: [{
-      SourceScopeStatus: "eligible",
-      SubjectBinding: "binding-opaque-123",
-      TaskID: "task-opaque-123",
-      SessionID: "session-opaque-123",
-      SubjectKind: "session",
-      ActorAttributionStatus: "complete",
-    }],
-    page_next_cursor: "cursor-opaque-123",
-    page_has_more: false,
+    phase: "daily",
+    scan_cursor: "cursor-opaque-123",
+    intervals: [{ start: "2026-10-01", end: "2026-10-30" }],
+    next_day: "2026-10-30",
+    days_total: 30,
+    days_done: 29,
+    day_attempts: 1,
+    day_seconds_total: "420",
     workspace_id: "workspace-opaque-123",
     status: "completed",
-    cursor: "cursor-opaque-123",
-    processed: 150,
-    missing: 1200,
+    sessions_found: 150,
+    sessions_imported: 149,
+    sessions_missing: 0,
+    sessions_skipped: 1,
+    started_at: "2026-10-30T12:00:00Z",
+    finished_at: "2026-10-30T12:07:00Z",
+    last_successful_at: "2026-10-30T12:07:00Z",
     undated: false,
-    pending_dates: ["2026-10-30"],
   };
   return [
     {
@@ -108,13 +108,28 @@ function safeRows() {
     },
     {
       scope: "plugin",
+      scopeId: "historical-import",
+      stateKey: "import-queue",
+      value: { workspace_ids: ["workspace-opaque-123"] },
+    },
+    {
+      scope: "plugin",
       scopeId: "collector",
       stateKey: "checkpoint",
       value: {
         last_date: "2026-10-30",
         last_scan_at: "2026-10-30T12:00:00Z",
         initialized: true,
-        pending: {},
+        pending: {
+          "session-opaque-123": {
+            subject_binding: "binding-opaque-123",
+            task_id: "task-opaque-123",
+            workspace_id: "workspace-opaque-123",
+            acp_session_id: "transcript-opaque-123",
+            state: "COMPLETED",
+            skipped: true,
+          },
+        },
       },
     },
     {
@@ -139,11 +154,52 @@ test("inspects allowlisted checkpoints without treating scheduling counts as usa
   const after = createHash("sha256").update(fs.readFileSync(db.databasePath)).digest("hex");
 
   assert.equal(result.pluginId, SESSION_COST_PLUGIN_ID);
-  assert.equal(result.rowCount, 4);
+  assert.equal(result.rowCount, 5);
   assert.equal(result.schemaCounts["historical-import-checkpoint"], 1);
+  assert.equal(result.schemaCounts["historical-import-queue"], 1);
   assert.equal(result.schemaCounts["usage-observation-receipt"], 1);
   assert.equal(before, after, "inspection must not modify the disposable database");
   assert.doesNotMatch(JSON.stringify(result), /binding-opaque|workspace-opaque|Private retained/);
+});
+
+test("validates the persisted historical import queue namespace", (t) => {
+  const queue = {
+    scope: "plugin",
+    scopeId: "historical-import",
+    stateKey: "import-queue",
+    value: { workspace_ids: ["workspace-opaque-123"] },
+  };
+  const accepted = fixture(t, [queue]);
+  assert.equal(
+    inspectRetainedUsagePluginState({ tmpDir: accepted.tmpDir, databaseFilename: accepted.databaseFilename })
+      .schemaCounts["historical-import-queue"],
+    1,
+  );
+
+  for (const invalidValue of [
+    { workspace_ids: "workspace-opaque-123" },
+    { workspace_ids: ["workspace-opaque-123", 42] },
+    { workspace_ids: ["workspace-opaque-123"], tokens: 0 },
+  ]) {
+    const db = fixture(t, [{ ...queue, value: invalidValue }]);
+    assert.throws(
+      () => inspectRetainedUsagePluginState({ tmpDir: db.tmpDir, databaseFilename: db.databaseFilename }),
+      /historical import queue is invalid|checkpoint contains an invalid string value|prohibited accounting or personal-data field/,
+    );
+  }
+});
+
+test("validates the persisted skipped flag on collector checkpoints", (t) => {
+  const rows = safeRows();
+  const collector = rows.find((row) => row.scopeId === "collector");
+  const pending = collector.value.pending["session-opaque-123"];
+  pending.skipped = "true";
+  const db = fixture(t, rows);
+
+  assert.throws(
+    () => inspectRetainedUsagePluginState({ tmpDir: db.tmpDir, databaseFilename: db.databaseFilename }),
+    /checkpoint contains an invalid boolean value/,
+  );
 });
 
 test("accepts the authenticated smoke's explicit canonical database filename", (t) => {
@@ -198,8 +254,7 @@ test("rejects prompt and title fields without printing checkpoint JSON", (t) => 
       stateKey: "historical-import",
       value: {
         workspace_id: "workspace-opaque-123",
-        schema_version: 2,
-        diagnostics_reliable: true,
+        schema_version: 3,
         status: "completed",
         [privateField]: "private fixture prose that must not be printed",
       },
@@ -224,8 +279,7 @@ test("rejects supplied private markers in otherwise allowed string fields", (t) 
     value: {
       run_id: marker,
       workspace_id: "workspace-opaque-123",
-      schema_version: 2,
-      diagnostics_reliable: true,
+      schema_version: 3,
       status: "completed",
     },
   }]);

@@ -224,8 +224,9 @@ function createActionHarness(options = {}) {
   const document = createDocument();
   const timers = createFakeTimers();
   const ui = Object.fromEntries(
-    ["Button", "Progress", "Spinner", "Tooltip", "TooltipTrigger", "TooltipContent"].map((name) => [name, name]),
+    ["Button", "Spinner", "Tooltip", "TooltipTrigger", "TooltipContent"].map((name) => [name, name]),
   );
+  if (options.progress) ui.Progress = "Progress";
   if (options.action) ui.Action = function Action() {};
   const sandbox = {
     window: {
@@ -799,7 +800,7 @@ test("failed import shows the stopped day and offers Resume", async () => {
 });
 
 test("daily import shows counts, day progress, and an estimate", async () => {
-  const view = createActionHarness({ locale: "en", settings: true,
+  const view = createActionHarness({ locale: "en", progress: true, settings: true,
     context: { getWorkspaceIds: () => ["ws"], getActiveWorkspaceId: () => "ws" },
     invokeAction: () => Promise.resolve({ status: "running", phase: "daily", sessions_found: 312, sessions_imported: 287, sessions_missing: 21, sessions_skipped: 4, days_total: 238, days_done: 142, current_day: "2026-03-12", eta_seconds: 2400 }),
   });
@@ -818,6 +819,17 @@ test("daily import shows counts, day progress, and an estimate", async () => {
   assert.equal(progress.props.max, 100);
   assert.equal(progress.props["aria-label"], "142 of 238 days");
   assert.ok(findElement(view.tree(), node => node.type === "Button" && renderedText(node) === "Cancel import"));
+});
+
+test("daily import remains readable when the Host does not provide Progress", async () => {
+  const view = createActionHarness({ locale: "en", settings: true,
+    context: { getWorkspaceIds: () => ["ws"], getActiveWorkspaceId: () => "ws" },
+    invokeAction: () => Promise.resolve({ status: "running", phase: "daily", sessions_found: 4, sessions_imported: 2, sessions_missing: 1, sessions_skipped: 1, days_total: 10, days_done: 4, current_day: "2026-03-12" }),
+  });
+  await flushPromises();
+  assert.match(view.text(), /4 of 10 days/);
+  assert.match(view.text(), /Working on 2026-03-12/);
+  assert.equal(findElement(view.tree(), node => node.type === "Progress"), null);
 });
 
 test("disabled import keeps Resume enabled so collection can be re-enabled", async () => {

@@ -63,25 +63,22 @@ API. English is the fallback; Portuguese (Portugal) is also included.
 
 ## Current verification (2026-11-01)
 
-The installed-Host historical-import smoke passed on `chromium` and
-`mobile-chrome` with retries disabled. It uses a non-empty synthetic tokscale
-report to verify adoption of existing sessions, visible progress, an unsafe
-session skip, a queued workspace, recovery after backend restart, and the
-Token Usage result. The main workspace imported one of two sessions and marked
-the unsafe session as skipped. The queued workspace imported its one session.
-The imported record matched 1,620 tokens and 4,200 cost subcents.
+`make test` passed with the Go suite and 74 Node tests. Bundle syntax, package
+checks, release-version checks, formatting, vet, and `go mod tidy -diff` passed.
+The Linux amd64 package passed manifest, file-list, and hash checks.
 
-A separate real tokscale timing sample covered 5,193 sessions over 129 days.
-The slowest sampled lifetime report took 72.01 seconds, a warm lifetime report
-took 24.56 seconds, and a bounded-day report took 18.58 seconds. All were below
-the 120-second timeout. These measurements depend on the machine and history;
-they do not guarantee the same time for a larger history. The browser smoke
-uses synthetic data and does not invoke real tokscale.
+The installed-package smoke ran on a disposable Host with retries disabled.
+Chromium passed four tests. Mobile Chrome passed three tests. The tests cover
+historical imports, import queueing and restart recovery, desktop and mobile
+actions, retained usage after deletion, and authenticated usage.
 
-`make test` passed, including the Go suite, 71 Node tests, bundle syntax,
-package verification, and release-version checks. Fresh GitHub checks for the
-updated PR head are pending. The core full-scale PostgreSQL and zero-FLAKY gates
-remain open, and this validation does not establish a minimum Host version.
+The historical-import smoke used a non-empty synthetic report. It imported
+1,620 tokens and 4,200 cost subcents. The report also covered an unsafe-session
+skip and a queued workspace. These browser tests do not run tokscale.
+
+See the [E7 evidence](docs/plans/token-usage/evidence/e7-pr-remediation-20261101/log-summary.json)
+for test names and package hashes. This validation does not establish a minimum
+Host version. The full-scale PostgreSQL and zero-FLAKY gates remain separate.
 
 ## Requirements and permissions
 
@@ -233,221 +230,23 @@ Historical target discovery can prepare metadata before freezing import membersh
 Each historical discovery request repeats the same initial query at most four times within its Host budget.
 Preparation runs no tokscale command and never counts as an empty or completed import.
 The UI shows preparation, preserves authorized saved values, and supports polling and import cancellation.
-Actual Host source-safety and indexed bounded-visit proof remain pending the coordinator's backend handoff.
 The existing subprocess coordinator owns refresh, collection, import, cancellation, and shutdown.
 
-Phase B checks passed against the local root SDK on 2026-10-29:
+### Tokscale group identity
 
-- `GOMAXPROCS=2 GOFLAGS=-p=1 make check-format vet test`: Go checks and 47 UI tests passed.
-- `GOMAXPROCS=2 go test -p 1 -race ./server/... -run 'TestUsageHistory|TestReport|TestCollector|TestHistorical' -count=1`: passed.
-- `GOMAXPROCS=2 GOFLAGS=-p=1 make -j1 build verify-package-host verify-package`: host and all five platform packages passed.
+Ordinary Tokscale session/model rows use schema 2 and the pinned `tokscale-session-model-v1` decomposition. Member and record identities use the exact producer `sessionId` and normalized model; provider, client, binding, date, and timezone do not distinguish members. Distinct rollout IDs remain separate even when they map to the same canonical transcript. The canonical ACP ID supplies Host context and checkpoint identity, but it never replaces the producer key.
 
-Receipts are in `/tmp/kandev-plugin-session-cost-phase-b/` for this task.
-The final source pin, public SDK metadata, real Host integration, and packaged browser checks remain pending.
-These local results do not establish a minimum supported Host version or complete Task 06.
+A metadata-only checkpoint reserves up to 1024 member hashes before reporting. Its key is the canonical transcript plus source date and timezone. Different dates have independent membership. Missing members quarantine the snapshot and preserve accepted values. Rejected new names do not enter the baseline. Missing rows do not create zeroes, tombstones, or inferred renames. Explicit stable-record adapters retain their own correction rules.
 
-Phase C metadata alignment checks also passed on 2026-10-29:
+Merged provider labels stay raw metadata with unavailable provider attribution. The first-contributor `client` is also raw metadata. The source-defined token total is derived only for the recognized pinned invocation when every category is present and exact addition is safe. Partial fields, unknown commands, and overflow keep the total unknown. Message counts do not establish Kandev turns.
 
-- Focused Go regressions covered trusted retained dates, unknown bounds, projection preparation, generation consistency, restart, and Kandev turn evidence.
-- `GOMAXPROCS=2 GOFLAGS=-p=1 make -j1 check-format vet test`: passed, including 49 UI tests.
-- `GOMAXPROCS=2 go test -p 1 -race ./server/... -run 'TestUsageHistoryProjection|TestUsageHistoryCanonicalKandevTurns|TestUsageHistoryTokscaleMessage|TestHistorical|TestResponsiveAction|TestReport' -count=1`: passed.
+## Older Host compatibility
 
-Phase C receipts are in `/tmp/kandev-plugin-session-cost-phase-c/`.
-The existing package archive contains Phase B. Rebuild it before integrated package or browser checks.
-Real Host, lifecycle, uninstall, package/browser checks, and the final SDK pin remain pending.
-
-Phase D adds SDK broker fixtures for publication restarts, unchanged cursors and filters, cancellation, denied reads, and unsupported Hosts.
-Privacy regressions cover ownership transfer, erasure without generic-state cleanup, legacy snapshot removal, and exact pending-receipt replay.
-Refresh actions preserve failed admission/readback states when the source report is ready.
-The full Go/vet/format checks and all 51 UI tests passed with `GOMAXPROCS=1` and `GOFLAGS=-p=1`.
-Exact focused, race, tidy, and failure receipts are in `/tmp/kandev-plugin-session-cost-phase-d/verification/`.
-Desktop and phone package fixtures cover actual admission/readback, restart, archive, deletion, import, disablement, and uninstall retention.
-Those installed-browser checks remain unrun. The current archive still contains Phase B.
-Rebuild it after all source changes and the coordinator's final reachable pin.
-These source checks do not establish a released SDK version or a minimum supported Host version.
-
-R1 state cleanup passed 13 focused broker/privacy tests, normally and under race, against the frozen state-key SDK.
-The archive fixture includes 453 keys per namespace, large values, restart, deletion, cancellation, and interrupted checkpoint writes.
-Completed archives perform no key enumeration. Exact uncertain receipt revisions and digests survive cleanup and restart.
-All 17 R1 review fixtures pass. The mixed-tenant source contract and actual Host proof remain pending.
-Current receipts and hashes are in `/tmp/kandev-plugin-session-cost-review-r1/state-keys/`.
-
-The typed source-safety checkpoint passed the full Go suite normally and under race: 130 test functions and 74 subtests.
-All 56 Node tests, format, vet, syntax, and module tidy checks passed.
-Regressions cover unsafe source status, revocation during calculation, preparing discovery, cancellation, and import restart.
-Exact commands, red/green receipts, and current hashes are in `/tmp/kandev-plugin-session-cost-review-r1/source-safety/`.
-That checkpoint preceded the point-query changes below.
-These plugin fixtures do not establish actual Host safety, a release floor, or final integration.
-
-The point-query checkpoint passed the full Go suite and full race suite: 141 test functions and 96 subtests each.
-All 56 Node tests and format, vet, tidy, syntax, and diff checks passed.
-Current/raw checks make no archive traversal. Immutable historical import keeps its separate snapshot/keyset enumeration.
-The broker harness now gives client shutdown one owner, fixing the duplicate-stop race found by the full race run.
-Receipts, exact commands, and hashes are in `/tmp/kandev-plugin-session-cost-review-r1/point-segments/`.
-
-Replacement adapters can supply explicit `Segment` identities. Declared segments require schema 2 and participate in the payload digest.
-Revision, correction, retry, and partial-absence handling preserve those supplied identities. Unsupported Hosts never cause an unsegmented downgrade.
-Unsegmented writes still use schema 1. That checkpoint preceded the approved pinned producer contract below.
-Actual backend segment selection and projection remain pending. This checkpoint does not close R1-I or Task 06.
-
-Ordinary Tokscale session/model rows now declare schema 2 using the versioned `tokscale-session-model-v1` decomposition.
-Member and record identities use the exact producer `sessionId` and exported normalized model.
-Provider, client, binding, date, and timezone do not distinguish members.
-Exact rollout IDs remain distinct when the existing suffix join maps them to one canonical ACP transcript.
-The canonical ACP ID supplies Host context and the membership-checkpoint key; it never substitutes for a producer key.
-Models-only DTOs cannot declare producer identity and remain unavailable for this adapter.
-
-A metadata-only checkpoint reserves up to 1024 member hashes before any report, including partial or uncertain writes.
-Its key is the canonical transcript plus source date/timezone. Different dates have independent membership.
-A disappearing member blocks the entire snapshot and preserves stale accepted values.
-Rejected new names do not enter the baseline; restoring the prior groups permits recovery after restart.
-No missing row becomes a zero, tombstone, or guessed rename. No accounting amounts enter these checkpoints.
-Explicit stable-record adapters retain their separate correction rules without gaining inferred disjointness.
-
-Merged provider labels stay raw metadata with unavailable provider attribution. The first-contributor `client` is also raw metadata.
-The source-defined token total is derived only for the recognized pinned invocation with every category present and safe exact addition.
-Partial fields, unknown commands, and overflow retain an unknown total. Message counts still do not establish Kandev turns.
-The [pinned fixture notes](server/testdata/README.md) link the primary source and document this codec.
-Producer receipts and frozen hashes are in `/tmp/kandev-plugin-session-cost-review-r1/tokscale-producer/`.
-The corrected producer checkpoint passed 152 Go functions and 105 subtests, both normally and under race.
-All 58 Node tests, formatting, vet, module tidy, and syntax checks passed with one Go process.
-Actual Host, legacy compatibility, lifecycle, package/browser, and final source-pin gates remain pending.
-
-## Retained-history integration status at the E2/E3a checkpoint (2026-10-30, NOT COMPLETE)
-
-E2 prepared an installed Host test matrix for native token usage, external reported cost, corrections, nullable values, currencies, action scope, and retention.
-E2R and E2R2 prepared fail-closed handling for Hosts that lack the history interface or current-target acknowledgement.
-E2T prepared a corrected revision sequence for the live smoke helper. The live smoke did not run.
-
-The E2 preparation receipts record `node --check`, formatting, and whitespace checks only. They contain no Go tests or Host integration from the C2 benchmark window.
-After E3a corrected the legacy Host fixture, the full `server/...` Go suite passed normally and under race. Vet, tidy, format, and all 61 Node tests also passed.
-The E3a checks use the sibling local SDK and do not establish the final pin, build/package verification, or real Host integration. Receipt: `/tmp/usage-history-luna-E3a-ready.json`.
-
-H3/K3/J3 prepared installed checks for authorization, delivery/session pruning, ownership transfer, erasure, and plugin-state privacy. These are preparations, not installed Host passes.
-J4/L3 are adapting the live smoke helper. No live helper result is ready.
-Core C3 is running the full SQLite benchmark with 1,000,000 native and 100,000 external rows for ten samples. The full PostgreSQL run remains pending.
-The core A3 current-main candidate is prepared but not adopted into primary, so the final reachable SDK pin remains open.
-The final package rebuild, actual Host selection and lifecycle checks, and installed desktop/phone browser results also remain pending. Task 06 is still open.
-E2 preparation receipts: `/tmp/usage-history-luna-E2-prep.json`, `/tmp/usage-history-luna-E2R-prep.json`, `/tmp/usage-history-luna-E2R2-prep.json`, and `/tmp/usage-history-luna-E2T-prep.json`.
-
-## Retained-history preparation checkpoint (E2–E4, superseded by E5)
-
-The M3 handler returns fixed upgrade guidance for the legacy GET webhook. The plugin regression proves that this handler makes no Host or CLI calls.
-The manifest marks the webhook `authenticated`. The source smoke helper asserts HTTP 401 for anonymous access, but that check has not run against an installed Host.
-
-Q3 passed the full `server/...` Go suite normally and under race. The focused M3 guard, `go vet`, and `go mod tidy -diff` also passed.
-The bundle tests passed 61 cases. The state-inspection tests passed 7 cases. The JavaScript syntax checks passed.
-Receipt: `/tmp/usage-history-luna-Q3-ready.json`. M3 source hashes and its handler contract are in `/tmp/usage-history-luna-M3-ready.json`.
-
-The retained-usage smoke uses the authenticated `session-usage` action. Its legacy case expects only the fixed GET guidance body.
-The prepared selectors use `SESSION_COST_EXPECT_ACTION=1` with `SESSION_COST_EXPECT_UPGRADE_REQUIRED=1` for Kandev `v0.97.0`.
-They use `SESSION_COST_EXPECT_ACTION=0` with the same upgrade selector for Kandev `v0.86.0`.
-Neither older-Host matrix has run against the current package. The installed Host, package, browser, and anonymous-401 checks remain pending.
-The selector receipts are `/tmp/usage-history-luna-L4-ready.json` and `/tmp/usage-history-luna-O3-ready.json`.
-
-At this checkpoint the final SDK pin, package, and installed Host checks were still pending. The E5 results below supersede that status.
-
-## Initial retained-history status (E5, 2026-10-30; superseded by E6)
-
-The plugin pins public Kandev commit `9a751dd7d88a12307ee3a23130651cb6a0b8f2d3`. The Go `pluginsdk` tree is `a9a0a09dc8b30ac02876ccc7e46eb18102079600`. Commit `1eb3bb1f944820150636cbeef66365f2994004b9` contains the plugin code. No minimum Kandev release is claimed.
-
-The full `server/...` Go suite passed normal and race runs. `go vet`, module tidy, Go formatting, JavaScript syntax checks, and all 68 Node tests passed. The 68 Node tests include 61 bundle tests and 7 state-inspection tests.
-
-The `0.5.0` archive passed `make verify-package` for all five supported platform binaries. Its SHA-256 is `b53001dc639cddb36c757e798f7c492ec3b2c8fc7543fc73bddf3be35bfb1a9e`.
-
-Five installed-package tests ran against core commit `9a751dd7d88a12307ee3a23130651cb6a0b8f2d3`. The backend used `KANDEV_FEATURES_WORKSPACE_COLLABORATION=true`. Playwright used one worker and zero retries.
-
-Desktop passed the toolbar test. Retained usage and authenticated multi-user tests returned errors. Phone passed the toolbar test. Its retained-usage test returned an error.
-
-Each retained-usage test expected `CostMetricAbsent=true` for a 150-token row. The Host returned `false`. The Host accepted a report for 1200 subcents. The stats API returned `cost_subcents=null`.
-
-These errors stopped the flows before pruning, uninstall, ownership transfer, or erasure checks. These lifecycle and privacy results are unverified. The tests did not change plugin assertions.
-
-The Go suite includes `TestLegacySessionCostWebhookIsStaticAndDoesNotCallHostOrCLI`. This test proves that the legacy webhook makes no Host or CLI calls. The installed anonymous-webhook HTTP 401 check did not run.
-
-The Host reduction sets `CostMetricAbsent` from whether a cost source was selected. This matches the test results, but remains an inference. A focused backend test can confirm this cause.
-
-See `/tmp/usage-history-E5-core-findings.json` for the Host finding. See `/tmp/usage-history-luna-E5-ready.json` for package, command, hash, and test results.
-
-The cached Kandev `v0.97.0` binary was available. The current test fixture returned HTTP 404 for a workspace PATCH request before package upload.
-The matching cached source is a sparse checkout. It omits tracked `apps/tsconfig.json`. Its E2E web build stopped when Vite could not find that file.
-These results do not show if v0.97 accepts the archive or returns `upgrade_required`. No v0.86 binary or source checkout was available. That test did not run.
-Earlier toolbar-only checks do not show current-package compatibility. No older release floor is claimed.
-
-The parent owns the full-scale core benchmark and final integration review. Task 06 remains open until the Host behavior is corrected and lifecycle and privacy checks pass.
-
-## Historical integration and compatibility checkpoint (E6, 2026-10-31)
-
-The tested archive is `kandev-session-cost-0.5.0.tar.gz`, SHA-256
-`b53001dc639cddb36c757e798f7c492ec3b2c8fc7543fc73bddf3be35bfb1a9e`. It was
-built from plugin source commit `1eb3bb1f944820150636cbeef66365f2994004b9` and
-pins Kandev SDK commit `9a751dd7d88a12307ee3a23130651cb6a0b8f2d3`.
-
-C6 confirmed a PostgreSQL precision bug. PostgreSQL rounded the point-coverage
-timestamps for the native event and matching reported price to the same
-microsecond. The overlap check then discarded the matching price. Core commit
-`98580f996c3867c7db9e87fabc0c321c4f1586e9` introduces the fix and its regression.
-C6's focused normal and race runs passed with SQLite and PostgreSQL 18.6.
-Receipt: `/tmp/usage-history-luna-C6-metric-ready.json`.
-
-The plugin fixtures now follow the confirmed metric contract. A native row with
-150 known tokens and no price has applicable unknown cost
-(`CostMetricAbsent=false`, `CostSubcents=nil`). The positive aggregate-price
-case uses the native event's exact source ID, model, provider, and observation
-time. A positive but unrelated price keeps aggregate cost unknown. Zero,
-unknown-token, partial-cost, and mixed-currency assertions remain in the smoke.
-
-Five installed-package browser tests passed on the coordinated v0.98.0-264 Host
-build. The desktop action and authenticated multi-user tests passed in run r7;
-desktop retention passed in r12; both phone tests passed in run r2. Playwright
-used one worker, zero retries, and the normal artifact checks. The retained flow
-reached restart, archive, task/session deletion, uninstall, and retained stats
-display. The stats page showed two unavailable sessions, 300 tokens, and $0.24,
-with no links to deleted tasks or sessions. The authenticated test passed
-anonymous legacy GET denial (HTTP 401), cross-workspace denial, and fixed
-upgrade guidance for authenticated users. The guidance exposed no usage values
-or target IDs, ran no Tokscale fixture command, and left usage totals unchanged.
-
-At the E6 checkpoint, the Tokscale fixture returned an empty report. The import
-status completed and accounted for every processed target as missing. This
-verified bounded import status and diagnostics, but did not prove source-data
-import. The non-empty follow-up result is recorded in Current verification
-above.
-
-The same unchanged archive was accepted by the exact tagged older Hosts:
-
-- Kandev `v0.97.0`, source `e43881c7555372897b57ec51c705f1e05da43c40`:
-  upload returned HTTP 201. The installed desktop and phone UI checks used the
-  POST action and received `upgrade_required`. Backend binary SHA-256:
-  `254985bbdc8a54896eca93893512445f1d1fff86006ae5afd2e9f230dd6505e5`.
-  The exact tagged E2E web build followed restoration of tracked
-  `apps/tsconfig.json`, omitted by the sparse checkout. Its index SHA-256 is
-  `996ce058a2a14bae86b95511a3fd52e5bb67ff49acec8764850aca9e03720227`.
-- Kandev `v0.86.0`, official tag source
-  `50a65247dd8871e5857c0cdefb50c127c790360b`: upload returned HTTP 201 and the
-  manifest reported version `0.5.0` with active status. The installed desktop
-  UI used the legacy GET route and received the fixed `upgrade_required`
-  response. Backend binary SHA-256:
-  `30b2bef8a6c355e7fe7b1f0bf5674b9a0c83e0d48924d46584450d34adfe98a9`.
-  Its tagged E2E web index SHA-256 is
-  `63cf2843e0c62a83c38c8d8d52d8735f669fa55075c6eb6241e347294037009d`.
-
-These older-Host checks prove archive acceptance and the tested upgrade-guidance
-routes. They do not prove retained-usage support on either older Host, and they
-do not establish a minimum Kandev release. The v0.86 phone route was not run.
-
-The current Host browser logs are `/tmp/usage-history-luna-E6-managed-chromium-r7.log`,
-`/tmp/usage-history-luna-E6-managed-chromium-r12.log`, and
-`/tmp/usage-history-luna-E6-managed-mobile-r2.log`. The v0.97 logs are
-`/tmp/usage-history-luna-E6-v097-api-probe.log`,
-`/tmp/usage-history-luna-E6-v097-desktop-r1.log`, and
-`/tmp/usage-history-luna-E6-v097-phone-r1.log`. The v0.86 API and desktop logs
-are `/tmp/session-cost-e6-v086-api-r3/backend-stdout.log` and
-`/tmp/usage-history-luna-E6-v086-desktop-r1.log`.
-
-E6 changed only plugin smoke fixtures and this evidence. The package archive and
-production plugin source are unchanged. The full source test suites from E5 were
-not repeated. Parent review and CI remain pending.
+The `0.5.0` archive was accepted by Kandev `v0.97.0` and `v0.86.0`. The
+installed UI paths tested on those Hosts returned fixed `upgrade_required`
+guidance. These checks confirm archive acceptance and fallback behavior; they
+do not establish retained-usage support or a minimum Kandev version. See the
+[historical E6 evidence](docs/plans/token-usage/evidence/e6-integration-20261031/verification.json).
 
 ## Settings
 
@@ -487,7 +286,7 @@ The coordinator must supply the final core revision before CI or release checks 
 
 ```sh
 git clone --filter=blob:none https://github.com/kdlbs/kandev.git ../kandev
-git -C ../kandev checkout --detach 9aecf156c65e7522a43f2a1c8310737179c25d70
+git -C ../kandev checkout --detach 9a751dd7d88a12307ee3a23130651cb6a0b8f2d3
 ```
 
 Do not point the module replacement at a floating branch. The host checkout is
@@ -636,12 +435,9 @@ version before it pushes release metadata or a tag. A pushed tag must match the
 manifest, Makefile, and packaged manifest before the workflow publishes a
 GitHub Release with the archive and `checksums.txt`.
 
-The statistics APIs require core PR #3660. The earlier stable-host smoke
-checks covered the toolbar Action contract; they do not establish support for
-the new collection and saved-usage APIs. Merge the core dependency before this PR.
+Session Cost retained history requires the Host APIs in core PR #3660. Hosts
+without those APIs return fixed `upgrade_required` guidance.
 
 ## License
 
 See [LICENSE](LICENSE).
-
-Parent review corrected the archive digest transcription and reran the seven state-inspection tests: all passed. Runtime plugin source and archive remain unchanged. Durable verification and log hashes are in `docs/plans/token-usage/evidence/e6-integration-20261031/`. Public CI and the core performance gates remain pending.

@@ -36,6 +36,11 @@ func TestReviewImportActionsFenceFormerScopeAndHideCheckpoint(t *testing.T) {
 			require.NoError(t, p.writeHistoricalImportState(context.Background(), "ws", old, true))
 			response, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{ActionKey: action, Context: pluginsdk.VerifiedActionContext{WorkspaceID: "ws"}})
 			require.NoError(t, err)
+			wantStatus := 200
+			if action == actionKeyImportStart {
+				wantStatus = 202
+			}
+			require.Equal(t, wantStatus, response.Status)
 			for _, secret := range []string{"private-", "former-org", "1999", "130", "87", "43", "snapshot_id", "run_id", "intervals", "next_day"} {
 				require.NotContains(t, string(response.Body), secret)
 			}
@@ -66,6 +71,7 @@ func TestReviewImportStatusSameScopeReturnsNarrowViewAfterRestart(t *testing.T) 
 	t.Cleanup(restarted.Close)
 	response, err := restarted.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{ActionKey: actionKeyImportStatus, Context: pluginsdk.VerifiedActionContext{WorkspaceID: "ws"}})
 	require.NoError(t, err)
+	require.Equal(t, 200, response.Status)
 	var view map[string]any
 	require.NoError(t, json.Unmarshal(response.Body, &view))
 	require.Equal(t, float64(130), view["sessions_found"])
@@ -89,6 +95,7 @@ func TestReviewImportErasureDiscardsCheckpointBeforeResume(t *testing.T) {
 	require.NoError(t, p.writeHistoricalImportState(context.Background(), "ws", old, true))
 	response, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{ActionKey: actionKeyImportStatus, Context: pluginsdk.VerifiedActionContext{WorkspaceID: "ws"}})
 	require.NoError(t, err)
+	require.Equal(t, 200, response.Status)
 	require.NotContains(t, string(response.Body), "erased")
 	require.NotContains(t, string(response.Body), "87")
 	require.NotContains(t, string(response.Body), "43")

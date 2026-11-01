@@ -201,6 +201,9 @@ func marshalUsageDisplay(value any, amounts tokenDisplay) ([]byte, error) {
 		return nil, err
 	}
 	for key, value := range amounts {
+		if _, encoded := fields[key]; !encoded {
+			continue
+		}
 		if value == nil {
 			fields[key] = json.RawMessage("null")
 			continue

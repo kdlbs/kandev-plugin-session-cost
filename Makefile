@@ -4,7 +4,8 @@ BIN := bin/kandev-session-cost
 VERSION := 0.5.0
 STAGE := .build/stage
 PKG_OUT := kandev-session-cost-$(VERSION).tar.gz
-KANDEV_BACKEND := ../kandev/apps/backend
+# Keep KANDEV_SDK as a compatibility alias for existing packaging commands.
+KANDEV_BACKEND ?= $(if $(KANDEV_SDK),$(KANDEV_SDK),../kandev/apps/backend)
 
 ## Build the plugin binary for this machine during development.
 build:

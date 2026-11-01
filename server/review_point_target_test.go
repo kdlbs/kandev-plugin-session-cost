@@ -170,9 +170,6 @@ func TestReviewPointLookupRevokedBindingQuarantinesIDReuseAcrossRestart(t *testi
 		}
 		target := eligibleTestTarget()
 		if revoked.Load() {
-			if query.CurrentTarget.SubjectBinding == target.SubjectBinding {
-				return pluginsdk.UsageCollectionTargetPageV1{CurrentTarget: true}, nil
-			}
 			target.SubjectBinding = "new-org-incarnation"
 		}
 		return pointTargetPage(target), nil
@@ -190,6 +187,11 @@ func TestReviewPointLookupRevokedBindingQuarantinesIDReuseAcrossRestart(t *testi
 	restarted := migrationPlugin(t, bridge)
 	require.ErrorIs(t, restarted.persistSessionUsage(context.Background(), "ws", "task-1", "session-1", response), errUsageScopeChanged)
 	require.Equal(t, int32(1), reports.Load())
+	var cached retainedUsageTarget
+	found, err := restarted.readUsageState(context.Background(), "usage-target-v1", targetCacheKey("ws", "task-1", "session-1"), &cached)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, cached.Quarantined, "a replacement binding for a reused task/session ID stays quarantined across restart")
 	mu.Lock()
 	defer mu.Unlock()
 	require.Len(t, queries, 2, "a revoked binding is not dropped so that the same transcript can be relabeled")

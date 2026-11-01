@@ -5,12 +5,11 @@ import (
 	"errors"
 
 	"github.com/kdlbs/kandev/pluginsdk"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Every raw source path must obtain current supported transcript context.
-// A saved snapshot grants neither current source access nor cross-scope reuse.
-// The coordinator's source-context handoff must confirm the Host's supported
-// context semantics before these paths count as integrated verification.
 func (p *plugin) preflightSource(ctx context.Context, workspace, task, session, transcript string, binding ...string) error {
 	_, err := p.currentSourceTarget(ctx, workspace, task, session, transcript, binding...)
 	return err
@@ -18,12 +17,21 @@ func (p *plugin) preflightSource(ctx context.Context, workspace, task, session, 
 
 func (p *plugin) currentSourceTarget(ctx context.Context, workspace, task, session, transcript string, binding ...string) (pluginsdk.UsageCollectionTargetV1, error) {
 	if workspace == "" {
-		row, err := p.Host().Tasks().Get(ctx, task)
+		lookupCtx, cancel := p.canonicalReadContext(ctx)
+		row, err := p.Host().Tasks().Get(lookupCtx, task)
+		ctxErr := lookupCtx.Err()
+		cancel()
+		if ctxErr != nil {
+			return pluginsdk.UsageCollectionTargetV1{}, ctxErr
+		}
+		if status.Code(err) == codes.NotFound {
+			return pluginsdk.UsageCollectionTargetV1{}, errUsageSourceUnavailable
+		}
 		if err != nil {
 			return pluginsdk.UsageCollectionTargetV1{}, err
 		}
 		if row == nil {
-			return pluginsdk.UsageCollectionTargetV1{}, errors.New("source context is unavailable")
+			return pluginsdk.UsageCollectionTargetV1{}, errUsageSourceUnavailable
 		}
 		workspace = row.WorkspaceID
 	}

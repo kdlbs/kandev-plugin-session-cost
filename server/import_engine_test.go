@@ -230,6 +230,7 @@ func TestImportEngineReclassifiesTargetThatBecomesIneligible(t *testing.T) {
 	require.Equal(t, 1, state.SessionsSkipped)
 	for _, item := range fixture.observations() {
 		require.NotEqual(t, second.SubjectBinding, item.SubjectBinding, "a revoked target never reaches a write")
+		require.NotEqual(t, "binding-revoked", item.SubjectBinding, "a replacement binding never receives the old cumulative report")
 	}
 }
 

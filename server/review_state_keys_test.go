@@ -41,6 +41,22 @@ func newMigrationArchiveHost() *migrationArchiveHost {
 	}
 }
 
+type invalidCleanupPageHost struct{ *migrationArchiveHost }
+
+func (h invalidCleanupPageHost) StateKeys() pluginsdk.StateKeyReader {
+	return stateKeyReaderFunc(func(context.Context, pluginsdk.StateKeyQuery) (pluginsdk.StateKeyPage, error) {
+		return pluginsdk.StateKeyPage{NextCursor: "stalled"}, nil
+	})
+}
+
+func TestReviewInvalidCleanupKeyPageStopsRetrying(t *testing.T) {
+	host := invalidCleanupPageHost{migrationArchiveHost: newMigrationArchiveHost()}
+	p := migrationPlugin(t, sdkBrokerHost(t, host))
+	err := p.ensureUsageStatePrivacy(context.Background())
+	require.ErrorContains(t, err, "invalid usage cleanup key page")
+	require.False(t, retryUsageStateCleanup(err), "a malformed Host page cannot become valid on a retry")
+}
+
 func (h *migrationArchiveHost) StateKeys() pluginsdk.StateKeyReader {
 	return stateKeyReaderFunc(func(ctx context.Context, query pluginsdk.StateKeyQuery) (pluginsdk.StateKeyPage, error) {
 		h.mu.Lock()

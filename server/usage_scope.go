@@ -12,6 +12,18 @@ import (
 
 var errUsageScopeChanged = errors.New("usage scope changed; cumulative transcript attribution is ambiguous")
 
+func invalidatesHistoricalImportScope(err error) bool {
+	if errors.Is(err, errUsageScopeChanged) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.NotFound, codes.PermissionDenied:
+		return true
+	default:
+		return false
+	}
+}
+
 // Reauthorize task-scoped action reads against the Host's current binding in
 // the verified workspace. Generic Host Usage RPCs are installation-scoped and
 // do not carry the action caller, so a verified tuple alone is not enough to
@@ -85,6 +97,9 @@ func (p *plugin) validateUsageSnapshot(ctx context.Context, workspace, snapshot 
 	query := pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: workspace, SnapshotID: snapshot, Limit: 1}
 	page, err := reader.ListTargets(ctx, query)
 	if err != nil {
+		if status.Code(err) == codes.FailedPrecondition {
+			return errUsageScopeChanged
+		}
 		return historyError(err)
 	}
 	return validateTargetPage(query, upper, page)
@@ -105,7 +120,7 @@ func (p *plugin) authorizedHistoricalImportState(ctx context.Context, workspace 
 	if err == nil {
 		return state, true, nil
 	}
-	if !errors.Is(err, errUsageScopeChanged) && !usageScopeDenied(err) {
+	if !invalidatesHistoricalImportScope(err) {
 		return historicalImportState{}, false, err
 	}
 	p.discardHistoricalImportState(ctx, workspace, state)

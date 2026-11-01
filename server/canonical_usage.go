@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/kdlbs/kandev/pluginsdk"
@@ -18,6 +19,8 @@ const (
 	reportErrorInvalidQuery = "invalid_query"
 	reportErrorAccessDenied = "access_denied"
 )
+
+var errCanonicalPublicationInvalid = errors.New("canonical usage publication is invalid")
 
 type canonicalSnapshot struct {
 	Version    int
@@ -114,12 +117,12 @@ func (p *plugin) readCanonicalPublication(ctx context.Context, filter pluginsdk.
 			return rows, projection, nil
 		}
 		if info.NextCursor == "" || seen[info.NextCursor] {
-			return nil, projection, errors.New("canonical usage cursor did not advance")
+			return nil, projection, fmt.Errorf("%w: cursor did not advance", errCanonicalPublicationInvalid)
 		}
 		seen[info.NextCursor] = true
 		page.Cursor = info.NextCursor
 	}
-	return nil, projection.preparing(), errors.New("canonical usage page limit exceeded")
+	return nil, projection.preparing(), fmt.Errorf("%w: page limit exceeded", errCanonicalPublicationInvalid)
 }
 
 func (p *plugin) beginCanonicalRead() uint64 {
@@ -182,6 +185,11 @@ func (p *plugin) loadSavedSessionUsage(ctx context.Context, workspaceID, taskID,
 	}
 	if errors.Is(err, context.Canceled) || status.Code(err) == codes.Canceled || errors.Is(ctx.Err(), context.Canceled) {
 		return nil, false, context.Canceled
+	}
+	if errors.Is(err, errCanonicalPublicationInvalid) {
+		response := p.canonicalReadFailure(sessionID, warn, high)
+		response.Error = "Kandev returned an invalid canonical usage page sequence"
+		return response, true, nil
 	}
 	if err == nil && current && projection.readable() {
 		if len(items) == 0 && projection.Status == "" && projection.Generation == "" {

@@ -154,9 +154,7 @@ func assertCanonicalMetricCase(t *testing.T, response *sessionCostResponse, test
 	require.Equal(t, test.total, response.TokenAmounts["total"])
 	require.Equal(t, test.turns, response.TokenAmounts["turns"])
 	require.Equal(t, test.costKnown, response.CostKnown)
-	if test.costKnown {
-		require.InDelta(t, test.cost, response.Cost, 1e-12)
-	}
+	require.InDelta(t, test.cost, response.Cost, 1e-12)
 	require.InDelta(t, test.costPerTurn, response.CostPerTurn, 1e-12)
 	require.Equal(t, test.currency, response.Currency)
 	require.Equal(t, test.basis, response.CostBasis)
@@ -169,11 +167,9 @@ func assertCanonicalMetricCase(t *testing.T, response *sessionCostResponse, test
 	require.Equal(t, test.exactCost, model.ExactCost)
 	require.NotNil(t, model.CostKnown)
 	require.Equal(t, test.costKnown, *model.CostKnown)
+	require.InDelta(t, test.cost, model.Cost, 1e-12)
 	require.Equal(t, test.currency, model.Currency)
 	require.Equal(t, test.basis, model.CostBasis)
-	if test.costKnown {
-		require.InDelta(t, test.cost, model.Cost, 1e-12)
-	}
 	encoded, err := json.Marshal(response)
 	require.NoError(t, err)
 	var wire map[string]json.RawMessage
@@ -189,6 +185,14 @@ func assertCanonicalMetricCase(t *testing.T, response *sessionCostResponse, test
 	}
 	if test.turns == nil {
 		require.JSONEq(t, "null", string(wire["turns"]), "cost facts supply no Kandev turn evidence")
+	}
+	if test.largeInput {
+		require.JSONEq(t, "null", string(wire["total"]), "unsafe totals must not reach the browser as numbers")
+		require.NotContains(t, models[0], "total", "model DTOs have no direct total field")
+		require.NotContains(t, models[0], "turns", "model DTOs have no direct turns field")
+		var modelAmounts map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(models[0]["token_amounts"], &modelAmounts))
+		require.JSONEq(t, `"18446744073709551614"`, string(modelAmounts["total"]))
 	}
 }
 

@@ -22,6 +22,10 @@ type usageRecordingReader struct {
 	canonicalFn func(context.Context, pluginsdk.SessionUsageFilter, pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error)
 }
 
+func (r *usageRecordingReader) List(ctx context.Context, filter pluginsdk.SessionUsageFilter, page pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
+	return r.list(ctx, filter, page)
+}
+
 func (r *usageRecordingReader) list(_ context.Context, filter pluginsdk.SessionUsageFilter, page pluginsdk.Page) ([]pluginsdk.SessionUsageMeasurement, *pluginsdk.PageInfo, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

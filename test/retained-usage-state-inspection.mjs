@@ -24,12 +24,14 @@ const safeImportStatuses = new Set([
   "not_started",
   "running",
   "preparing",
+  "queued",
   "completed",
   "failed",
   "cancelled",
   "disabled",
   "unsupported",
 ]);
+const safeImportPhases = new Set(["scanning", "daily", "completed"]);
 const safeSessionStates = new Set([
   "CREATED",
   "STARTING",
@@ -63,6 +65,7 @@ const forbiddenFieldParts = [
 const schemaNames = [
   "collector-checkpoint",
   "historical-import-checkpoint",
+  "historical-import-queue",
   "privacy-migration-checkpoint",
   "usage-observation-receipt",
   "usage-target-checkpoint",
@@ -288,6 +291,7 @@ function validateCollectorPending(value) {
     "attempts",
     "dates",
     "date_attempts",
+    "skipped",
   ], ["task_id", "workspace_id", "acp_session_id", "state"]);
   for (const key of ["active_date"]) if (Object.hasOwn(pending, key)) assertDate(pending[key]);
   for (const key of ["rollover_dates", "dates"]) if (Object.hasOwn(pending, key)) assertDateArray(pending[key]);
@@ -297,6 +301,7 @@ function validateCollectorPending(value) {
   if (!safeSessionStates.has(pending.state)) fail("collector checkpoint contains an invalid session state");
   if (Object.hasOwn(pending, "updated_at")) assertTimestamp(pending.updated_at);
   if (Object.hasOwn(pending, "attempts")) assertNonnegativeInteger(pending.attempts);
+  if (Object.hasOwn(pending, "skipped")) assertBoolean(pending.skipped);
   if (Object.hasOwn(pending, "date_attempts")) {
     assertIdentityMap(pending.date_attempts, (attempts) => assertNonnegativeInteger(attempts));
     for (const date of Object.keys(pending.date_attempts)) assertDate(date);
@@ -313,65 +318,48 @@ function validateCollector(value) {
   }
 }
 
-function validateImportedTarget(value) {
-  const target = assertObject(value, [
-    "SourceScopeStatus",
-    "SessionStartedAt",
-    "SessionEndedAt",
-    "CoverageStart",
-    "CoverageEnd",
-    "SubjectBinding",
-    "TaskID",
-    "SessionID",
-    "ExternalSessionID",
-    "SubjectKind",
-    "ActorAttributionStatus",
-  ]);
-  if (Object.hasOwn(target, "SourceScopeStatus") && !["eligible", "mixed", "unknown"].includes(target.SourceScopeStatus)) {
-    fail("import checkpoint contains an invalid source status");
-  }
-  for (const key of ["SessionStartedAt", "SessionEndedAt", "CoverageStart", "CoverageEnd"]) {
-    assertOptionalNullableString(target, key, { pattern: timestampPattern });
-  }
-  for (const key of ["SubjectBinding", "TaskID", "SubjectKind", "ActorAttributionStatus"]) {
-    assertOptionalString(target, key, { empty: key === "SubjectKind" || key === "ActorAttributionStatus" });
-  }
-  for (const key of ["SessionID", "ExternalSessionID"]) assertOptionalNullableString(target, key);
-}
-
 function validateImport(value) {
   const state = assertObject(value, [
     "run_id",
     "schema_version",
-    "diagnostics_reliable",
-    "legacy_diagnostics",
-    "snapshot_id",
-    "snapshot_upper_bound",
-    "page_targets",
-    "page_next_cursor",
-    "page_has_more",
-    "page_dates",
-    "page_found",
-    "page_missing_ids",
     "workspace_id",
     "status",
-    "cursor",
-    "processed",
-    "missing",
-    "missing_session_ids",
-    "last_error",
+    "phase",
+    "snapshot_id",
+    "snapshot_upper_bound",
+    "scan_cursor",
+    "intervals",
+    "next_day",
+    "days_total",
+    "days_done",
+    "day_attempts",
+    "day_seconds_total",
+    "sessions_found",
+    "sessions_imported",
+    "sessions_missing",
+    "sessions_skipped",
     "started_at",
     "finished_at",
     "last_successful_at",
+    "last_error",
     "undated",
-    "pending_dates",
-  ], ["schema_version", "diagnostics_reliable", "workspace_id", "status"]);
-  if (state.schema_version !== 2) fail("historical import checkpoint version is unsupported");
-  for (const key of ["diagnostics_reliable", "legacy_diagnostics", "page_has_more", "undated"]) {
-    if (Object.hasOwn(state, key)) assertBoolean(state[key]);
+  ], ["schema_version", "workspace_id", "status"]);
+  if (state.schema_version !== 3) fail("historical import checkpoint version is unsupported");
+  if (Object.hasOwn(state, "undated")) assertBoolean(state.undated);
+  for (const key of ["run_id", "snapshot_id", "workspace_id"]) assertOptionalString(state, key);
+  if (Object.hasOwn(state, "scan_cursor")) assertString(state.scan_cursor, { empty: true });
+  if (Object.hasOwn(state, "phase") && !safeImportPhases.has(state.phase)) {
+    fail("historical import checkpoint phase is invalid");
   }
-  for (const key of ["run_id", "snapshot_id", "page_next_cursor", "cursor", "workspace_id"]) {
-    assertOptionalString(state, key, { empty: key === "page_next_cursor" || key === "cursor" });
+  if (Object.hasOwn(state, "next_day")) assertDate(state.next_day);
+  if (Object.hasOwn(state, "intervals")) {
+    if (!Array.isArray(state.intervals) || state.intervals.length > 10_000) fail("historical import intervals exceed their bound");
+    for (const interval of state.intervals) {
+      const checked = assertObject(interval, ["start", "end"], ["start", "end"]);
+      assertDate(checked.start);
+      assertDate(checked.end);
+      if (checked.start > checked.end) fail("historical import interval is invalid");
+    }
   }
   if (Object.hasOwn(state, "snapshot_upper_bound")) {
     if (typeof state.snapshot_upper_bound !== "string" || !/^\d+$/.test(state.snapshot_upper_bound)) {
@@ -379,19 +367,13 @@ function validateImport(value) {
     }
   }
   if (!safeImportStatuses.has(state.status)) fail("historical import checkpoint status is invalid");
-  for (const key of ["processed", "missing"]) if (Object.hasOwn(state, key)) assertNonnegativeInteger(state[key]);
-  if (Object.hasOwn(state, "page_targets")) {
-    if (!Array.isArray(state.page_targets) || state.page_targets.length > 50) fail("historical import target page exceeds its bound");
-    for (const target of state.page_targets) validateImportedTarget(target);
+  for (const key of ["days_total", "days_done", "day_attempts", "sessions_found", "sessions_imported", "sessions_missing", "sessions_skipped"]) {
+    if (Object.hasOwn(state, key)) assertNonnegativeInteger(state[key]);
   }
-  if (Object.hasOwn(state, "page_dates")) {
-    assertIdentityMap(state.page_dates, assertDateArray);
-  }
-  if (Object.hasOwn(state, "page_found")) {
-    assertIdentityMap(state.page_found, assertBoolean);
-  }
-  for (const key of ["page_missing_ids", "missing_session_ids"]) {
-    if (Object.hasOwn(state, key)) assertOpaqueArray(state[key], 100);
+  if (Object.hasOwn(state, "day_seconds_total")) {
+    if (typeof state.day_seconds_total !== "string" || !/^\d+$/.test(state.day_seconds_total)) {
+      fail("historical import duration is invalid");
+    }
   }
   if (Object.hasOwn(state, "last_error") && state.last_error !== "") {
     fail("checkpoint contains free-form error text");
@@ -399,7 +381,14 @@ function validateImport(value) {
   for (const key of ["started_at", "finished_at", "last_successful_at"]) {
     if (Object.hasOwn(state, key)) assertTimestamp(state[key]);
   }
-  if (Object.hasOwn(state, "pending_dates")) assertDateArray(state.pending_dates);
+}
+
+function validateImportQueue(value) {
+  const queue = assertObject(value, ["workspace_ids"], ["workspace_ids"]);
+  if (!Array.isArray(queue.workspace_ids) || queue.workspace_ids.length > 10_000) {
+    fail("historical import queue is invalid");
+  }
+  for (const workspaceId of queue.workspace_ids) assertString(workspaceId);
 }
 
 function schemaForRow(row) {
@@ -420,6 +409,9 @@ function schemaForRow(row) {
   }
   if (row.scope === "plugin" && row.scope_id === "collector" && row.state_key === "checkpoint") {
     return "collector-checkpoint";
+  }
+  if (row.scope === "plugin" && row.scope_id === "historical-import" && row.state_key === "import-queue") {
+    return "historical-import-queue";
   }
   if (row.scope === "workspace" && row.scope_id && row.state_key === "historical-import") {
     assertString(row.scope_id);
@@ -458,6 +450,9 @@ function validateRow(row, schema, markers) {
       break;
     case "historical-import-checkpoint":
       validateImport(outer);
+      break;
+    case "historical-import-queue":
+      validateImportQueue(outer);
       break;
     default:
       fail("plugin state schema is unsupported");

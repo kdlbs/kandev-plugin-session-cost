@@ -21,6 +21,7 @@ const (
 var (
 	errUsageStateCleanupPending     = errors.New("legacy usage state cleanup is pending")
 	errUsageStateCleanupUnsupported = errors.New("upgrade Kandev to support bounded usage state cleanup")
+	errUsageStateInvalidKeyPage     = errors.New("invalid usage cleanup key page")
 )
 
 type usagePrivacyMigration struct {
@@ -90,7 +91,7 @@ func (p *plugin) ensureUsageStatePrivacy(ctx context.Context) error {
 				return err
 			}
 			if len(page.Keys) > usageCleanupBatch || (page.NextCursor != "" && (len(page.Keys) == 0 || page.NextCursor == migration.Cursor)) {
-				return errors.New("invalid usage cleanup key page")
+				return errUsageStateInvalidKeyPage
 			}
 			migration.PageLoaded = true
 			migration.PendingKeys = page.Keys
@@ -167,7 +168,7 @@ func (p *plugin) scrubUsageStateKey(ctx context.Context, namespace, key string) 
 }
 
 func retryUsageStateCleanup(err error) bool {
-	if errors.Is(err, errUsageStateCleanupUnsupported) {
+	if errors.Is(err, errUsageStateCleanupUnsupported) || errors.Is(err, errUsageStateInvalidKeyPage) {
 		return false
 	}
 	switch status.Code(err) {
@@ -201,11 +202,14 @@ func (p *plugin) startUsageStateCleanup() {
 				p.usageCleanupMu.Unlock()
 				return
 			}
-			if ctx.Err() != nil || !retryUsageStateCleanup(err) {
+			if ctx.Err() != nil {
 				return
 			}
 			if !errors.Is(err, errUsageStateCleanupPending) {
 				log.Printf("session-cost state cleanup remains pending: %v", err)
+			}
+			if !retryUsageStateCleanup(err) {
+				return
 			}
 		}
 	}()

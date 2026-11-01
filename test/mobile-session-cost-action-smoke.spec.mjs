@@ -37,7 +37,7 @@ test.describe("Session Cost packaged action on a phone host", () => {
   );
 
   test("retains real Host admitted usage through restart, archive, deletion and uninstall on a phone", async ({ testPage, apiClient, seedData, backend }, testInfo) => {
-    test.skip(expectUpgradeRequired, "The selected older Host is expected to require retained-usage support.");
+    test.skip(expectUpgradeRequired || !expectAction, "The selected Host does not use the authenticated retained-usage action path.");
     test.setTimeout(360_000);
     await runSessionCostRetentionSmoke({ testPage, apiClient, seedData, backend, testInfo, touch: true, expect });
   });

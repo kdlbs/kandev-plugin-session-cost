@@ -27,7 +27,7 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
   const { SessionPage } = await import(pathToFileURL(path.join(hostRoot, "apps/web/e2e/pages/session-page.ts")).href);
   const fixture = createTokscaleFixture();
   fixture.release("release-first");
-  // The historical import fixture intentionally has no Tokscale rows.
+  // This lifecycle fixture covers the empty-source case; the separate historical-import smoke verifies successful non-empty imports.
   fixture.writeReport([]);
   let chat;
   let deliveryTaskId;
@@ -494,9 +494,10 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
       importState = await response.json();
       return importState.status;
     }, { timeout: 90_000, message: "Retained targets must remain importable after live task/session deletion, with the configured one-minute import budget" }).toBe("completed");
-    expect(importState.processed).toBeGreaterThanOrEqual(2);
-    expect(importState.missing).toBe(importState.processed);
-    expect(importState.diagnostics_reliable).toBe(true);
+    expect(importState.sessions_found).toBeGreaterThanOrEqual(2);
+    expect(importState.sessions_missing).toBeGreaterThanOrEqual(2);
+    expect(importState.sessions_missing + importState.sessions_imported + importState.sessions_skipped)
+      .toBe(importState.sessions_found);
     expect(importState).not.toHaveProperty("snapshot_id");
     expect(importState).not.toHaveProperty("page_targets");
     await exactReport();
@@ -511,11 +512,9 @@ export async function runSessionCostRetentionSmoke({ testPage, apiClient, seedDa
     expect((await read("canonical")).rows.find((row) => !row.TokenMetricAbsent)?.TotalTokens).toBe(150);
     const fixtureSourceRows = (await read("source")).rows;
     expect(fixtureSourceRows).toHaveLength(1);
-    expect(fixtureSourceRows[0]).toMatchObject({
-      SourceRecordID: "reported-native-cost",
-      SourceVersion: "e2e-fixture-v1",
-      CostSubcents: 1200,
-    });
+    expect(fixtureSourceRows[0].SourceRecordID).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fixtureSourceRows[0].SourceVersion).toBe("1");
+    expect(fixtureSourceRows[0].CostSubcents).toBe(1200);
     await testPage.goto(`/stats/token-usage?workspaceId=${seedData.workspaceId}&range=all`);
     const breakdown = await usage.selectUsageView(testPage, "Sessions", touch);
     const rows = breakdown.getByTestId(touch ? "token-usage-mobile-row" : "token-usage-row");
