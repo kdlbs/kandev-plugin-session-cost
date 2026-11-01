@@ -896,6 +896,23 @@ test("invalid saved usage queries show a query error without polling or invented
   assert.equal(view.requests.length, 1);
 });
 
+test("invalid canonical publications show a dedicated localized error without polling", async () => {
+  const english = createActionHarness({ action: true, locale: "en" });
+  english.trigger().props.onClick();
+  english.requests[0].resolve(costResponse({ found: false, saved: false, report_state: "failed", report_error: "invalid_publication", cost_known: false }));
+  await flushPromises();
+  assert.match(english.text(), /Kandev returned an invalid saved usage response/);
+  assert.doesNotMatch(english.text(), /Couldn't update cost\. Try again/);
+  english.advanceTime(4000);
+  assert.equal(english.requests.length, 1);
+
+  const portuguese = createActionHarness({ action: true, locale: "pt-pt" });
+  portuguese.trigger().props.onClick();
+  portuguese.requests[0].resolve(costResponse({ found: false, saved: false, report_state: "failed", report_error: "invalid_publication", cost_known: false }));
+  await flushPromises();
+  assert.match(portuguese.text(), /O Kandev devolveu uma resposta inválida de utilização guardada/);
+});
+
 test("authorization denial clears earlier saved amounts and stops polling", async () => {
   for (const status of [401, 403, 404]) {
     const view = createActionHarness({ action: true, locale: "en" });

@@ -27,6 +27,7 @@ var TRANSLATIONS = {
     canonicalPending: "Saved usage is updating. Showing the last completed selection.",
     canonicalPreparing: "Saved usage is preparing.",
     savedQueryRejected: "Kandev rejected the saved usage query. Reload Session Cost to try again.",
+    invalidPublication: "Kandev returned an invalid saved usage response. Reload Session Cost to try again.",
     usageAccessDenied: "Saved usage is no longer accessible.",
     sourceContextUnavailable: "Source usage is unavailable for this retained scope. Saved usage remains authoritative.",
     sourceContextPreparing: "Source eligibility is preparing. Saved usage remains authoritative.",
@@ -77,6 +78,7 @@ var TRANSLATIONS = {
     canonicalPending: "A utilização guardada está a ser atualizada. A mostrar a última seleção concluída.",
     canonicalPreparing: "A utilização guardada está a ser preparada.",
     savedQueryRejected: "O Kandev rejeitou a consulta de utilização guardada. Volte a carregar o Session Cost para tentar novamente.",
+    invalidPublication: "O Kandev devolveu uma resposta inválida de utilização guardada. Volte a carregar o Session Cost para tentar novamente.",
     usageAccessDenied: "A utilização guardada já não está acessível.",
     sourceContextUnavailable: "A utilização da origem não está disponível para este âmbito guardado. A utilização guardada mantém-se como referência.",
     sourceContextPreparing: "A elegibilidade da origem está a ser preparada. A utilização guardada mantém-se como referência.",
@@ -480,6 +482,8 @@ function tooltipBody(h, ui, state, t) {
         ? "usageAccessDenied"
         : d.report_error === "invalid_query"
         ? "savedQueryRejected"
+        : d.report_error === "invalid_publication"
+        ? "invalidPublication"
         : d.report_error === "timeout"
         ? "reportTimeout"
         : d.report_error === "unavailable"
