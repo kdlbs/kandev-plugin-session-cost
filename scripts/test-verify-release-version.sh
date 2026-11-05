@@ -60,6 +60,14 @@ make_fixture matching-package
 matching_file=$(make_archive "$test_dir/matching-package" "kandev-session-cost-$base_version.tar.gz" "$base_version" kandev-session-cost)
 (cd "$test_dir/matching-package" && sh "$verify_script" "v$base_version" "$matching_file")
 
+make_fixture normalized-package
+normalized_file=$(make_archive "$test_dir/normalized-package" "kandev-session-cost-$base_version.tar.gz" "$base_version" kandev-session-cost)
+sed -e 's/^id: "\(.*\)"$/id: \1/' -e 's/^version: "\(.*\)"$/version: \1/' \
+	"$test_dir/normalized-package/archive/manifest.yaml" > "$test_dir/normalized-package/archive/manifest.next"
+mv "$test_dir/normalized-package/archive/manifest.next" "$test_dir/normalized-package/archive/manifest.yaml"
+tar -czf "$test_dir/normalized-package/$normalized_file" -C "$test_dir/normalized-package/archive" manifest.yaml
+(cd "$test_dir/normalized-package" && sh "$verify_script" "v$base_version" "$normalized_file")
+
 make_fixture wrong-package-version
 wrong_file=$(make_archive "$test_dir/wrong-package-version" "kandev-session-cost-$base_version.tar.gz" "$wrong_version" kandev-session-cost)
 expect_failure 'an archive manifest version that differs from its tag' "$test_dir/wrong-package-version" "v$base_version" "$wrong_file"

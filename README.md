@@ -64,13 +64,17 @@ The package contains server binaries for Linux amd64 and arm64, macOS amd64 and
 arm64, and Windows amd64. The UI uses the host's React instance and does not
 bundle a second React runtime.
 
-The Go and frontend SDK source pin is
-`570600439036e81f8e9e1c63f15c4abce8a6c846`, which includes host PR #3943 and
-`host.ui.Action`. This is a source revision, not a Kandev release number. The
-UI detects Action and retains the Button path for older hosts. The manifest
-does not declare a minimum Kandev version. Packaged UI checks passed against
-Kandev `v0.97.0` and the older `v0.86.0` reference; these tested versions do not
-establish a declared support floor.
+The backend uses the public Go SDK
+`github.com/kdlbs/kandev/pluginsdk v0.1.0`. Its installed `sdk-release.json`
+declares host release and minimum Kandev version **0.99.0**, with API versions
+1 and 2. This package keeps API v1 and declares that SDK-wide host floor in
+`manifest.yaml`. SDK versions are independent of plugin and Kandev versions.
+Previously installed plugin binaries keep their existing compatibility; this
+source migration raises the declared floor for newly built packages.
+
+The UI is a committed JavaScript bundle with no npm SDK dependency or lockfile.
+It uses the host's React and registry API directly, detects `host.ui.Action`,
+and retains its existing Button fallback.
 
 ## Settings
 
@@ -95,22 +99,39 @@ curl -F package=@kandev-session-cost-0.4.1.tar.gz http://localhost:8080/api/plug
 
 ## Develop and verify
 
-Use Go 1.26 and Node.js 24. The Go module resolves the unpublished Kandev SDK
-from a sibling checkout at `../kandev/apps/backend`. Create a private checkout
-for this plugin worktree and pin it to the source revision above:
+Use Go 1.26 and Node.js 24. SDK compilation, tests, and compatibility checks
+resolve the public module without a Kandev sibling checkout:
 
 ```sh
-git clone --filter=blob:none https://github.com/kdlbs/kandev.git ../kandev
-git -C ../kandev checkout --detach 570600439036e81f8e9e1c63f15c4abce8a6c846
+go mod download
+make sdk-check
 ```
 
-Do not point the module replacement at a floating branch. The host checkout is
-outside the plugin tree and can be shared by Go builds, package checks, and the
-disposable host smoke test.
+Keep the exact Go SDK pin and upgrade it deliberately. After an upgrade, run
+`go mod tidy`, inspect the installed SDK's `sdk-release.json`, update the
+manifest floor if needed, and rerun compatibility, tests, packages, and the
+minimum-host smoke. If a frontend SDK dependency is introduced, use the matching
+exact `@kdlbs/plugin-sdk` version and pass its installed path to the checker.
+
+Packaging still needs backend-owned `plugin-pack`. `.kandev-pack-ref` pins its
+source separately from the public SDK. Create a task-owned tooling checkout
+(the root `pluginsdk/` directory is required by the backend module):
+
+```sh
+git clone --filter=blob:none --sparse https://github.com/kdlbs/kandev.git /tmp/session-cost-pack-tools
+git -C /tmp/session-cost-pack-tools sparse-checkout set apps/backend pluginsdk
+git -C /tmp/session-cost-pack-tools checkout --detach "$(cat .kandev-pack-ref)"
+export KANDEV_PACK_ROOT=/tmp/session-cost-pack-tools
+```
+
+`KANDEV_PACK_ROOT` defaults to `../kandev` for existing packaging layouts. It
+must point to the tested tooling revision. Public SDK resolution does not make
+packaging checkout-free.
 
 Run the local checks from the plugin root:
 
 ```sh
+make sdk-check
 make check-format
 go mod tidy
 git diff --exit-code -- go.mod go.sum
@@ -140,7 +161,7 @@ Build the disposable Kandev host and its E2E fixture package:
 ```sh
 PLUGIN_ROOT=$PWD
 HOST_ROOT=$PLUGIN_ROOT/../kandev
-(cd "$HOST_ROOT" && make build-backend build-web-e2e build-e2e-plugin-package)
+(cd "$HOST_ROOT" && make build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture build-e2e-send-now-fixture)
 (cd "$HOST_ROOT/apps" && pnpm install --frozen-lockfile)
 ```
 
@@ -158,19 +179,20 @@ The browser calls the installed webhook and checks its recovery states.
   pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs")
 ```
 
-For an older host checkout, set `KANDEV_HOST_ROOT` to its path and set
-`SESSION_COST_EXPECT_ACTION=0`. Build that host with the same commands first.
-The checked fallback reference is Kandev `v0.86.0`.
+Set `KANDEV_HOST_ROOT` to the disposable source checkout at the declared
+minimum host. Older host/fallback checks from previous plugin releases do not
+establish support below this package's declared floor.
 
-The stable release check also uses this same package against Kandev `v0.97.0`
-([release](https://github.com/kdlbs/kandev/releases/tag/v0.97.0), source commit
-`e43881c7555372897b57ec51c705f1e05da43c40`). Verify the published Linux x64
+The minimum-host release check uses this same package against Kandev `v0.99.0`
+([release](https://github.com/kdlbs/kandev/releases/tag/v0.99.0), source commit
+`f0e2e774cfe2df8a0d15e4c21dea7b48580e38fb`). Verify the published Linux x64
 full-runtime archive with its `.sha256` file. Set `PLUGIN_ROOT` to this
 checkout, `HOST_ROOT` to a source checkout at that exact commit, `TASK_TMP` to
 a short task-owned temporary directory, and `E2E_RUNTIME` to a subdirectory of
 `TASK_TMP`. Build the release source's E2E web assets and `mock-agent` fixture
-(`pnpm install --frozen-lockfile`, `make build-web-e2e`, and
-`make -C apps/backend build-mock-agent`). `agentctl` looks for `mock-agent`
+(`pnpm install --frozen-lockfile`, `make build-web-e2e`,
+`make build-e2e-plugin-package build-e2e-delivery-fixture build-e2e-send-now-fixture`,
+and `make -C apps/backend build-mock-agent`). `agentctl` looks for `mock-agent`
 beside the runtime executable, so copy the verified runtime to a disposable
 directory and add that fixture beside it; do not modify the downloaded
 release archive. For example:
@@ -212,9 +234,12 @@ Each successful run attaches and saves a task-composer screenshot under
 ## CI and releases
 
 Pull requests check module tidiness, Go formatting, vet, Go and UI tests, and
-both host-only and full platform packages. CI, package builds, and releases
-read the same immutable SDK source pin from `.kandev-sdk-ref`. Node is set up
-explicitly for the UI tests.
+both host-only and full platform packages. SDK compilation and tests use the
+public Go module without a host checkout.
+Build and release workflows retain a packaging-only checkout pinned by
+`.kandev-pack-ref`, including `apps/backend` and root `pluginsdk/`.
+`make sdk-check` runs the installed-dependency compatibility checker before
+build/package. Node is set up explicitly for the UI tests.
 
 Release automation runs from `main`. Select a patch, minor, or major bump, then
 use its dry run before a release. The workflow builds and validates the proposed
@@ -222,10 +247,9 @@ version before it pushes release metadata or a tag. A pushed tag must match the
 manifest, Makefile, and packaged manifest before the workflow publishes a
 GitHub Release with the archive and `checksums.txt`.
 
-The stable-host validation condition for this package is met on Kandev `v0.97.0`,
-which includes PR #3943. Keep the package parked in its draft PR until the
-maintainer authorizes merge and the remaining overlapping plugin work is
-reconciled.
+See [SDK migration validation](docs/sdk-migration-validation.md) for current
+standalone, packaging, and minimum-host smoke evidence. No plugin release or
+catalog change is part of this migration.
 
 ## License
 
