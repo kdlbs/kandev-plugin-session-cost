@@ -1,15 +1,20 @@
-.PHONY: build test fmt check-format vet package package-host package-file verify-package verify-package-host clean
+.PHONY: build test fmt check-format vet package package-host package-file verify-package verify-package-host sdk-check clean
 
 BIN := bin/kandev-session-cost
 VERSION := 0.4.1
 STAGE := .build/stage
 PKG_OUT := kandev-session-cost-$(VERSION).tar.gz
-KANDEV_SDK := ../kandev/apps/backend
+KANDEV_PACK_ROOT ?= ../kandev
+KANDEV_PACK_BACKEND = $(abspath $(KANDEV_PACK_ROOT))/apps/backend
 
 ## Build the plugin binary for this machine during development.
-build:
+build: sdk-check
 	mkdir -p bin
 	go build -o $(BIN) ./server
+
+## Check installed SDK metadata against the manifest host floor and API version.
+sdk-check:
+	go run github.com/kdlbs/kandev/pluginsdk/cmd/kandev-sdk-check@v0.1.0 --manifest manifest.yaml
 
 ## Run Go, browser-bundle, package-verifier, and release-version checks.
 test:
@@ -29,8 +34,8 @@ vet:
 	go vet ./server/...
 
 ## Build every platform declared by manifest.yaml and package the plugin with
-## the pinned sibling Kandev checkout's plugin-pack command.
-package:
+## backend-owned plugin-pack from the separately pinned tooling checkout.
+package: sdk-check
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/server
 	cp manifest.yaml $(STAGE)/manifest.yaml
@@ -40,18 +45,18 @@ package:
 	GOOS=darwin  GOARCH=amd64 go build -o $(STAGE)/server/plugin-darwin-amd64      ./server
 	GOOS=darwin  GOARCH=arm64 go build -o $(STAGE)/server/plugin-darwin-arm64      ./server
 	GOOS=windows GOARCH=amd64 go build -o $(STAGE)/server/plugin-windows-amd64.exe ./server
-	cd $(KANDEV_SDK) && go run ./cmd/plugin-pack -dir $(CURDIR)/$(STAGE) -out $(CURDIR)/$(PKG_OUT)
+	cd "$(KANDEV_PACK_BACKEND)" && go run ./cmd/plugin-pack -dir $(CURDIR)/$(STAGE) -out $(CURDIR)/$(PKG_OUT)
 	rm -rf $(STAGE)
 	@echo "Wrote $(PKG_OUT)"
 
 ## Package only the current platform for faster local iteration.
-package-host:
+package-host: sdk-check
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/server
 	cp manifest.yaml $(STAGE)/manifest.yaml
 	cp -r ui $(STAGE)/ui
 	go build -o $(STAGE)/server/plugin-$$(go env GOOS)-$$(go env GOARCH)$$(go env GOEXE) ./server
-	cd $(KANDEV_SDK) && go run ./cmd/plugin-pack -dir $(CURDIR)/$(STAGE) -out $(CURDIR)/$(PKG_OUT) -platform-only
+	cd "$(KANDEV_PACK_BACKEND)" && go run ./cmd/plugin-pack -dir $(CURDIR)/$(STAGE) -out $(CURDIR)/$(PKG_OUT) -platform-only
 	rm -rf $(STAGE)
 	@echo "Wrote $(PKG_OUT)"
 

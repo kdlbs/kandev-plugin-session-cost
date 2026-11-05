@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
 

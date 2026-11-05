@@ -23,7 +23,7 @@ copy_fixture() {
 		$0 == "runtime:" { in_runtime = 1; next }
 		in_runtime && $0 == "  executables:" { in_executables = 1; next }
 		in_executables && $0 !~ /^    / { exit }
-		in_executables && /^    [[:alnum:]_-]+: "[^\"]+"$/ {
+		in_executables && /^    [[:alnum:]_-]+: "[^"]+"$/ {
 			path = $2
 			gsub(/"/, "", path)
 			print path
@@ -65,6 +65,30 @@ rm "$test_dir/valid-host/server/plugin-linux-arm64"
 rm "$test_dir/valid-host/server/plugin-windows-amd64.exe"
 write_checksums "$test_dir/valid-host"
 sh "$verify_script" "$test_dir/valid-host" host linux-amd64 >/dev/null
+
+# Current plugin-pack emits plain scalar values and four-space indentation.
+copy_fixture normalized-full
+# Increase all runtime indentation without relying on awk replacement groups.
+sed -e 's/^id: "kandev-session-cost"$/id: kandev-session-cost/' \
+	-e '/^runtime:/,/^[^ ]/{ s/^  /    /; s/^      /        /; s/"//g; }' \
+	"$test_dir/normalized-full/manifest.yaml" > "$test_dir/normalized-full/manifest.next"
+mv "$test_dir/normalized-full/manifest.next" "$test_dir/normalized-full/manifest.yaml"
+write_checksums "$test_dir/normalized-full"
+sh "$verify_script" "$test_dir/normalized-full" full >/dev/null
+
+copy_fixture normalized-host
+cp "$test_dir/normalized-full/manifest.yaml" "$test_dir/normalized-host/manifest.yaml"
+sed -e '/        darwin-/d' -e '/        linux-arm64:/d' -e '/        windows-/d' \
+	"$test_dir/normalized-host/manifest.yaml" > "$test_dir/normalized-host/manifest.next"
+mv "$test_dir/normalized-host/manifest.next" "$test_dir/normalized-host/manifest.yaml"
+rm "$test_dir/normalized-host/server/plugin-darwin-amd64" \
+	"$test_dir/normalized-host/server/plugin-darwin-arm64" \
+	"$test_dir/normalized-host/server/plugin-linux-arm64" \
+	"$test_dir/normalized-host/server/plugin-windows-amd64.exe"
+write_checksums "$test_dir/normalized-host"
+sh "$verify_script" "$test_dir/normalized-host" host linux-amd64 >/dev/null
+expect_failure 'a host-only manifest in a full package' "$test_dir/normalized-host" full
+expect_failure 'a host-only manifest for another platform' "$test_dir/normalized-host" host linux-arm64
 
 copy_fixture missing-binary
 rm "$test_dir/missing-binary/server/plugin-linux-amd64"

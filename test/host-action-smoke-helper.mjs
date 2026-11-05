@@ -145,7 +145,7 @@ async function attachBackendDiagnostics(backend, testInfo, testPage) {
 }
 
 async function captureTaskComposerScreenshot(testPage, testInfo, touch) {
-  const filename = touch ? "v0.97.0-phone-task-composer.png" : "v0.97.0-desktop-task-composer.png";
+  const filename = touch ? "session-cost-phone-task-composer.png" : "session-cost-desktop-task-composer.png";
   const screenshot = await testPage.screenshot();
   await testInfo.attach(filename, { body: screenshot, contentType: "image/png" });
   const artifactDir = process.env.SESSION_COST_SMOKE_ARTIFACT_DIR;

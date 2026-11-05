@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func servePlugin(p *plugin) {
