@@ -7,14 +7,14 @@ PKG_OUT := kandev-session-cost-$(VERSION).tar.gz
 KANDEV_PACK_ROOT ?= ../kandev
 KANDEV_PACK_BACKEND = $(abspath $(KANDEV_PACK_ROOT))/apps/backend
 
-## Check installed SDK metadata against the manifest host floor and API version.
-sdk-check:
-	go run github.com/kdlbs/kandev/pluginsdk/cmd/kandev-sdk-check@v0.1.0 --manifest manifest.yaml
-
 ## Build the plugin binary for this machine during development.
 build: sdk-check
 	mkdir -p bin
 	go build -o $(BIN) ./server
+
+## Check installed SDK metadata against the manifest host floor and API version.
+sdk-check:
+	go run github.com/kdlbs/kandev/pluginsdk/cmd/kandev-sdk-check@v0.1.0 --manifest manifest.yaml
 
 ## Run Go, browser-bundle, package-verifier, and release-version checks.
 test:
