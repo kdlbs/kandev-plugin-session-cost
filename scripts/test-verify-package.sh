@@ -128,4 +128,21 @@ expect_failure 'a manifest with an undeclared platform' "$test_dir/wrong-platfor
 
 expect_failure 'an unsupported host platform' "$test_dir/valid" host freebsd-amd64
 
+for quote_side in opening closing; do
+	for field in id executable; do
+		name=unmatched-$quote_side-$field
+		copy_fixture "$name"
+		case "$field:$quote_side" in
+			id:opening) edit='s/^id: "kandev-session-cost"$/id: "kandev-session-cost/' ;;
+			id:closing) edit='s/^id: "kandev-session-cost"$/id: kandev-session-cost"/' ;;
+			executable:opening) edit='s#linux-amd64: "server/plugin-linux-amd64"#linux-amd64: "server/plugin-linux-amd64#' ;;
+			executable:closing) edit='s#linux-amd64: "server/plugin-linux-amd64"#linux-amd64: server/plugin-linux-amd64"#' ;;
+		esac
+		sed "$edit" "$fixture/manifest.yaml" > "$fixture/manifest.next"
+		mv "$fixture/manifest.next" "$fixture/manifest.yaml"
+		write_checksums "$fixture"
+		expect_failure "an unmatched $quote_side quote in $field" "$fixture" full
+	done
+done
+
 printf 'package verifier negative tests passed\n'

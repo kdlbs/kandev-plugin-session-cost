@@ -217,3 +217,25 @@ Committed evidence:
 Full logs remain under `/tmp/session-cost-sdk-migration/`. After the smoke driver
 updates, `make check-format vet test sdk-check build` passed again. No plugin
 release, catalog update, merge, or author notification was performed.
+
+## Review follow-up
+
+On 2026-11-09, Greptile identified that independently optional quote characters
+accepted malformed YAML identity values. New negative cases reproduced that
+failure before the fix. Identity/version/path patterns now match plain or fully
+quoted values as separate alternatives. Regression cases reject both unmatched
+opening and closing quotes in package IDs, executable paths, source versions,
+and archive IDs/versions, including archives with freshly generated checksums.
+
+The following checks passed after the fix:
+
+```sh
+sh scripts/test-verify-package.sh
+sh scripts/test-verify-release-version.sh
+make test
+sh scripts/verify-package.sh /tmp/session-cost-sdk-migration/package-inspect full
+sh scripts/verify-release-version.sh v0.4.1 /tmp/session-cost-sdk-migration/standalone/plugin/kandev-session-cost-0.4.1.tar.gz
+```
+
+The source/runtime payload is unchanged by this verifier fix; the previously
+validated standalone full archive passes the stricter checks.

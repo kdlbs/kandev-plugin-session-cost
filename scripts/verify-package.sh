@@ -19,7 +19,7 @@ for required in manifest.yaml ui/bundle.js checksums.txt; do
 	[ -f "$package_dir/$required" ] || fail "missing required file: $required"
 done
 
-manifest_id=$(sed -nE 's/^id: "?([^"]+)"?$/\1/p' "$package_dir/manifest.yaml")
+manifest_id=$(sed -nE 's/^id: ("[^"]+"|[^"[:space:]]+)$/\1/p' "$package_dir/manifest.yaml" | tr -d '"')
 manifest_api=$(sed -nE 's/^api_version: ([0-9]+)$/\1/p' "$package_dir/manifest.yaml")
 [ "$manifest_id" = "kandev-session-cost" ] || fail "unexpected plugin id: ${manifest_id:-missing}"
 [ "$manifest_api" = "1" ] || fail "unexpected plugin API version: ${manifest_api:-missing}"
@@ -29,7 +29,7 @@ manifest_executables=$(awk '
 	$0 == "runtime:" { in_runtime = 1; next }
 	in_runtime && /^[[:space:]]+executables:$/ { in_executables = 1; next }
 	in_executables && /^[^[:space:]]/ { exit }
-	in_executables && /^[[:space:]]+[[:alnum:]_-]+: "?[^"[:space:]]+"?$/ {
+	in_executables && /^[[:space:]]+[[:alnum:]_-]+: ("[^"[:space:]]+"|[^"[:space:]]+)$/ {
 		platform = $1
 		sub(/:$/, "", platform)
 		path = $2
