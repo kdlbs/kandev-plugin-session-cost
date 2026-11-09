@@ -207,29 +207,34 @@ chmod +x "$E2E_RUNTIME/bin/mock-agent"
 
 Set `KANDEV_E2E_BIN` to `$E2E_RUNTIME/bin/kandev` and `KANDEV_HOST_ROOT` to
 `$HOST_ROOT`. Put `$E2E_RUNTIME/bin` first on `PATH`. Use isolated `HOME`, XDG
-data/config/cache directories, `TMPDIR`, and Playwright port offsets, and run
-the two projects separately with `--workers=1`:
+data/config/cache directories, `TMPDIR`, and Playwright port offsets. Start
+from a sanitized environment so inherited `KANDEV_BUNDLE_DIR`, `KANDEV_VERSION`,
+or service configuration cannot select another installed host. Bind to loopback
+and require `/health` to report the expected release. Run the two projects
+separately with `--workers=1`:
 
 ```sh
 mkdir -p "$TASK_TMP/home" "$TASK_TMP/config" "$TASK_TMP/data" \
   "$TASK_TMP/cache" "$TASK_TMP/tmp" "$TASK_TMP/artifacts"
 
-env HOME="$TASK_TMP/home" XDG_CONFIG_HOME="$TASK_TMP/config" \
+env -i LANG=C.UTF-8 HOME="$TASK_TMP/home" XDG_CONFIG_HOME="$TASK_TMP/config" \
   XDG_DATA_HOME="$TASK_TMP/data" XDG_CACHE_HOME="$TASK_TMP/cache" \
   TMPDIR="$TASK_TMP/tmp" PATH="$E2E_RUNTIME/bin:$PATH" \
   NODE_OPTIONS='--import=tsx' KANDEV_HOST_ROOT="$HOST_ROOT" \
   KANDEV_E2E_BIN="$E2E_RUNTIME/bin/kandev" \
   SESSION_COST_SMOKE_ARTIFACT_DIR="$TASK_TMP/artifacts" \
   SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.4.1.tar.gz" \
-  SESSION_COST_EXPECT_ACTION=1 E2E_PORT_OFFSET=22 \
+  SESSION_COST_EXPECT_ACTION=1 SESSION_COST_EXPECT_HOST_VERSION=0.99.0 \
+  KANDEV_SERVER_HOST=127.0.0.1 E2E_PORT_OFFSET=22 \
   pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs" \
     --project=chromium --workers=1 --retries=0
 
 # Repeat with E2E_PORT_OFFSET=23 and --project=mobile-chrome.
 ```
 
-Each successful run attaches and saves a task-composer screenshot under
-`$TASK_TMP/artifacts`.
+Each run records its `/health` response, and each successful run attaches and
+saves a task-composer screenshot under `$TASK_TMP/artifacts`. On NixOS, pass the
+required browser runtime library paths into the sanitized child environment.
 
 ## CI and releases
 

@@ -98,3 +98,122 @@ reported `all modules verified`; the graph selects
 The full module graph and command logs are retained under the task-owned
 `/tmp/session-cost-sdk-migration/` directory. Checks use actual repository
 commands, including all 26 UI tests; there is no recipe subproject.
+
+Standalone host-only and full packaging also passed with `GOWORK=off`,
+`CGO_ENABLED=0`, and `KANDEV_PACK_ROOT=/tmp/session-cost-sdk-migration/tooling`:
+
+```sh
+make verify-package-host KANDEV_PACK_ROOT=/tmp/session-cost-sdk-migration/tooling
+make verify-package KANDEV_PACK_ROOT=/tmp/session-cost-sdk-migration/tooling
+sh scripts/verify-release-version.sh v0.4.1 kandev-session-cost-0.4.1.tar.gz
+```
+
+The full standalone archive SHA-256 is
+`6dcb32b9b8588ee26bf0198dd3080c2a51f34b27a49c606fec1a0874795bba01`.
+Its exact inventory is:
+
+```text
+manifest.yaml
+server/plugin-darwin-amd64
+server/plugin-darwin-arm64
+server/plugin-linux-amd64
+server/plugin-linux-arm64
+server/plugin-windows-amd64.exe
+ui/bundle.js
+checksums.txt
+```
+
+All seven internal checksums passed. Semantic inspection with the tooling
+checkout's installed YAML parser confirmed that every source manifest value is
+preserved in the full packaged manifest, including API v1, the 0.99.0 floor,
+permissions, config schema, webhook and platforms. The packaged UI matches
+`origin/main:ui/bundle.js` byte for byte. `go version -m` on the packaged Linux
+binary selects public `github.com/kdlbs/kandev/pluginsdk v0.1.0`.
+
+## Minimum-host browser smoke
+
+On 2026-11-08, both projects passed against the verified published
+[v0.99.0 Linux x64 full runtime](https://github.com/kdlbs/kandev/releases/tag/v0.99.0).
+The archive SHA-256 was
+`24df61be8750fdf3ef151243f6385a4d14b0e3c84a409b6b11a1ef5fee3237be`;
+`sha256sum -c kandev-linux-x64-full.tar.gz.sha256` passed before extraction.
+The downloaded archive was preserved. Its extracted disposable runtime gained
+only the source-matched `mock-agent` test fixture beside its executables.
+
+The tooling checkout at the same source commit was expanded for test support:
+
+```sh
+git -C /tmp/session-cost-sdk-migration/tooling sparse-checkout add apps/web apps/packages scripts
+(cd /tmp/session-cost-sdk-migration/tooling/apps && pnpm install --frozen-lockfile)
+make -C /tmp/session-cost-sdk-migration/tooling build-web-e2e
+make -C /tmp/session-cost-sdk-migration/tooling/apps/backend build-mock-agent
+make -C /tmp/session-cost-sdk-migration/tooling build-e2e-plugin-package
+make -C /tmp/session-cost-sdk-migration/tooling build-e2e-delivery-fixture
+GOMAXPROCS=2 GOGC=25 GOFLAGS=-p=1 make -C /tmp/session-cost-sdk-migration/tooling build-e2e-send-now-fixture
+cp /tmp/session-cost-sdk-migration/tooling/apps/backend/bin/mock-agent /tmp/session-cost-sdk-migration/runtime/kandev/bin/mock-agent
+```
+
+The first send-now fixture build was killed during compilation; the final
+command above completed with reduced compiler parallelism/memory use. The first
+browser launch lacked 22 shared libraries on NixOS. These were resolved from
+already installed Nix store outputs into the task-local `browser-library-path`
+file used below. No host checkout or parent process environment was modified.
+
+The smoke driver initially expected an older host's `quick-chat-start` control.
+v0.99.0 uses `quick-chat-send` with an opening prompt. The driver now supports
+both controls, preserves the disabled-submit and no-usage-request-before-session
+assertions, and records/asserts actual host health before installation.
+
+Exact successful runner (Node 24.19.0, Playwright 1.61.1, pnpm 9.15.9 for the host):
+
+```sh
+TASK_TMP=/tmp/scsdk-smoke
+HOST_ROOT=/tmp/session-cost-sdk-migration/tooling
+E2E_RUNTIME=/tmp/session-cost-sdk-migration/runtime/kandev
+PLUGIN_ROOT=/tmp/session-cost-sdk-migration/standalone/plugin
+mkdir -p "$TASK_TMP"/{home,config,data,cache,tmp,artifacts}
+cd "$HOST_ROOT/apps/web"
+for project in chromium mobile-chrome; do
+  case "$project" in chromium) offset=26;; mobile-chrome) offset=27;; esac
+  env -i LD_LIBRARY_PATH="$(cat /tmp/session-cost-sdk-migration/browser-library-path)" \
+    LANG=C.UTF-8 NIX_LD="${NIX_LD-}" NIX_LD_LIBRARY_PATH="${NIX_LD_LIBRARY_PATH-}" \
+    HOME="$TASK_TMP/home" XDG_CONFIG_HOME="$TASK_TMP/config" \
+    XDG_DATA_HOME="$TASK_TMP/data" XDG_CACHE_HOME="$TASK_TMP/cache" \
+    TMPDIR="$TASK_TMP/tmp" PATH="$E2E_RUNTIME/bin:$PATH" \
+    PLAYWRIGHT_BROWSERS_PATH=/home/zeval/.cache/ms-playwright \
+    NODE_OPTIONS='--import=tsx' KANDEV_HOST_ROOT="$HOST_ROOT" \
+    KANDEV_E2E_BIN="$E2E_RUNTIME/bin/kandev" \
+    SESSION_COST_SMOKE_ARTIFACT_DIR="$TASK_TMP/artifacts" \
+    SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.4.1.tar.gz" \
+    SESSION_COST_EXPECT_ACTION=1 SESSION_COST_EXPECT_HOST_VERSION=0.99.0 \
+    KANDEV_SERVER_HOST=127.0.0.1 E2E_PORT_OFFSET="$offset" \
+    node node_modules/@playwright/test/cli.js test \
+      --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs" \
+      --project="$project" --workers=1 --retries=0
+done
+```
+
+Results: desktop `1 passed (35.9s)`; phone `1 passed (33.8s)`, with no retries.
+Both live `/health` responses reported `version: v0.99.0`, `status: ok`,
+`service: kandev`, `mode: websocket+http`. Starting with `env -i` removes inherited
+`KANDEV_BUNDLE_DIR`, `KANDEV_VERSION`, internal config, service, session, and
+supervisor selection variables. Fixture backends use separate temporary HOME,
+SQLite databases, worktrees, agentctl ports, and loopback listeners.
+
+The tests upload the full standalone package through Settings, configure the
+plugin (including restart), run real Host session reads/webhook requests against
+mock-agent sessions, verify scoped costs for two sessions, pin/close disclosure,
+refresh/poll/failure/retry, disable/re-enable, and desktop/phone composer geometry.
+A controlled tokscale fixture provides report data; this is not a live tokscale
+provider/transcript integration test. Other platform binaries were not executed.
+
+Committed evidence:
+
+- [Desktop health](evidence/sdk-v0.1.0/desktop-host-health.json)
+- [Phone health](evidence/sdk-v0.1.0/phone-host-health.json)
+- [Desktop composer](evidence/sdk-v0.1.0/session-cost-desktop-task-composer.png)
+- [Phone composer](evidence/sdk-v0.1.0/session-cost-phone-task-composer.png)
+
+Full logs remain under `/tmp/session-cost-sdk-migration/`. After the smoke driver
+updates, `make check-format vet test sdk-check build` passed again. No plugin
+release, catalog update, merge, or author notification was performed.

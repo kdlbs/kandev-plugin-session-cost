@@ -168,6 +168,22 @@ export async function runSessionCostHostSmoke({
   const packagePath = process.env.SESSION_COST_PACKAGE_PATH;
   if (!packagePath) throw new Error("Set SESSION_COST_PACKAGE_PATH to a built plugin archive.");
 
+  const healthResponse = await apiClient.rawRequest("GET", "/health");
+  expect(healthResponse.ok, "disposable host health endpoint").toBe(true);
+  const hostHealth = await healthResponse.json();
+  const healthEvidence = JSON.stringify(hostHealth, null, 2);
+  await testInfo.attach("host-health.json", { body: healthEvidence, contentType: "application/json" });
+  const artifactDir = process.env.SESSION_COST_SMOKE_ARTIFACT_DIR;
+  if (artifactDir) {
+    fs.mkdirSync(artifactDir, { recursive: true });
+    fs.writeFileSync(path.join(artifactDir, touch ? "phone-host-health.json" : "desktop-host-health.json"), healthEvidence);
+  }
+  const expectedHostVersion = process.env.SESSION_COST_EXPECT_HOST_VERSION;
+  if (expectedHostVersion) {
+    expect(String(hostHealth.version).replace(/^v/, ""), "actual disposable host version")
+      .toBe(expectedHostVersion.replace(/^v/, ""));
+  }
+
   let installed = false;
   let quickChat;
   let secondQuickChat;
@@ -207,7 +223,7 @@ export async function runSessionCostHostSmoke({
     if (expectAction) {
       dialog = await openQuickChatDialog(testPage, touch, expectAction, expect);
       const setup = await openNewQuickChatSetup(dialog, testPage, expect);
-      const startButton = setup.getByTestId("quick-chat-start");
+      const startButton = setup.getByTestId("quick-chat-start").or(setup.getByTestId("quick-chat-send"));
       await expect(startButton).toBeDisabled();
 
       const { dwell } = await import(
@@ -217,7 +233,7 @@ export async function runSessionCostHostSmoke({
         testPage,
         250,
         "negative-assertion",
-        "the Quick Chat setup has no active session or composer action, so Session Cost must not request usage",
+        "the Quick Chat setup has no active session, so Session Cost must not request usage",
       );
       expect(requests).toHaveLength(0);
 
@@ -231,6 +247,11 @@ export async function runSessionCostHostSmoke({
           response.request().method() === "POST",
         { timeout: 30_000 },
       );
+      // Current hosts start a chat by sending the opening prompt; older hosts
+      // use a separate Start control. Both must remain gated before setup.
+      if ((await startButton.getAttribute("data-testid")) === "quick-chat-send") {
+        await setup.getByTestId("task-description-input").fill("Session Cost action smoke");
+      }
       await expect(startButton).toBeEnabled({ timeout: 10_000 });
       if (touch) await startButton.tap();
       else await startButton.click();
