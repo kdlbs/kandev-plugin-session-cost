@@ -1,0 +1,6 @@
+{
+  "mode": "websocket+http",
+  "service": "kandev",
+  "status": "ok",
+  "version": "v0.99.0"
+}

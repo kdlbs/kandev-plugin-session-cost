@@ -60,6 +60,14 @@ make_fixture matching-package
 matching_file=$(make_archive "$test_dir/matching-package" "kandev-session-cost-$base_version.tar.gz" "$base_version" kandev-session-cost)
 (cd "$test_dir/matching-package" && sh "$verify_script" "v$base_version" "$matching_file")
 
+make_fixture normalized-package
+normalized_file=$(make_archive "$test_dir/normalized-package" "kandev-session-cost-$base_version.tar.gz" "$base_version" kandev-session-cost)
+sed -e 's/^id: "\(.*\)"$/id: \1/' -e 's/^version: "\(.*\)"$/version: \1/' \
+	"$test_dir/normalized-package/archive/manifest.yaml" > "$test_dir/normalized-package/archive/manifest.next"
+mv "$test_dir/normalized-package/archive/manifest.next" "$test_dir/normalized-package/archive/manifest.yaml"
+tar -czf "$test_dir/normalized-package/$normalized_file" -C "$test_dir/normalized-package/archive" manifest.yaml
+(cd "$test_dir/normalized-package" && sh "$verify_script" "v$base_version" "$normalized_file")
+
 make_fixture wrong-package-version
 wrong_file=$(make_archive "$test_dir/wrong-package-version" "kandev-session-cost-$base_version.tar.gz" "$wrong_version" kandev-session-cost)
 expect_failure 'an archive manifest version that differs from its tag' "$test_dir/wrong-package-version" "v$base_version" "$wrong_file"
@@ -71,5 +79,28 @@ expect_failure 'an archive manifest with another plugin id' "$test_dir/wrong-pac
 make_fixture wrong-package-name
 wrong_name_file=$(make_archive "$test_dir/wrong-package-name" "renamed.tar.gz" "$base_version" kandev-session-cost)
 expect_failure 'an archive whose filename differs from the package version' "$test_dir/wrong-package-name" "v$base_version" "$wrong_name_file"
+
+for quote_side in opening closing; do
+	make_fixture unmatched-source-$quote_side
+	case "$quote_side" in
+		opening) edit='s/^version: "\(.*\)"$/version: "\1/' ;;
+		closing) edit='s/^version: "\(.*\)"$/version: \1"/' ;;
+	esac
+	sed "$edit" "$fixture/manifest.yaml" > "$fixture/manifest.next"
+	mv "$fixture/manifest.next" "$fixture/manifest.yaml"
+	expect_failure "an unmatched $quote_side quote in source version" "$fixture" "v$base_version"
+	for field in id version; do
+		make_fixture unmatched-package-$quote_side-$field
+		file=$(make_archive "$fixture" "kandev-session-cost-$base_version.tar.gz" "$base_version" kandev-session-cost)
+		case "$quote_side" in
+			opening) edit="s/^$field: \"\\(.*\\)\"$/$field: \"\\1/" ;;
+			closing) edit="s/^$field: \"\\(.*\\)\"$/$field: \\1\"/" ;;
+		esac
+		sed "$edit" "$fixture/archive/manifest.yaml" > "$fixture/archive/manifest.next"
+		mv "$fixture/archive/manifest.next" "$fixture/archive/manifest.yaml"
+		tar -czf "$fixture/$file" -C "$fixture/archive" manifest.yaml
+		expect_failure "an unmatched $quote_side quote in packaged $field" "$fixture" "v$base_version" "$file"
+	done
+done
 
 printf 'release version negative tests passed\n'
