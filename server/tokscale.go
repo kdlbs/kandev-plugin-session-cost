@@ -8,7 +8,7 @@ import (
 // pinnedTokscale is the npx fallback used when tokscale is neither configured
 // nor on PATH. Pinned so the JSON output shape can't drift under us; bump
 // deliberately after checking `models --json` still parses.
-const pinnedTokscale = "tokscale@4.15.1"
+const pinnedTokscale = "tokscale@4.23.0"
 
 // Command sources, reported in InstallStatus.Source so the UI can explain
 // where the tokscale invocation came from.
@@ -41,7 +41,7 @@ func resolveCommand(configured string, lookPath func(string) (string, error)) re
 // InstallStatus reports the command used to build a successful report. It
 // remains part of the response for compatibility with existing UI.
 type InstallStatus struct {
-	// Command is the resolved argv joined for display, e.g. "npx -y tokscale@4.15.1".
+	// Command is the resolved argv joined for display, e.g. "npx -y tokscale@4.23.0".
 	Command string `json:"command"`
 	// Source is where the command came from: "settings", "path" or "npx".
 	Source string `json:"source"`
@@ -55,7 +55,7 @@ type InstallStatus struct {
 // implementations; production uses the process-tree-aware runner.
 type runner func(ctx context.Context, name string, args ...string) ([]byte, error)
 
-// commandDisplay renders the resolved argv for humans ("npx -y tokscale@4.15.1").
+// commandDisplay renders the resolved argv for humans ("npx -y tokscale@4.23.0").
 func commandDisplay(cmd resolvedCommand) string {
 	return strings.Join(cmd.Argv, " ")
 }

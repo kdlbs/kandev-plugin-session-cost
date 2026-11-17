@@ -81,7 +81,7 @@ and retains its existing Button fallback.
 Open **Settings → Plugins → Session Cost**:
 
 - `command` sets the tokscale command or path. Empty uses `tokscale` from PATH,
-  then the pinned `npx -y tokscale@4.15.1` fallback.
+  then the pinned `npx -y tokscale@4.23.0` fallback.
 - `warn_threshold` is the USD amount at which the displayed total turns amber.
   Its default is 1.
 - `high_threshold` is the USD amount at which the displayed total turns red.
