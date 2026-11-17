@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] - 2026-11-17
+
+### Changed
+
+- Update tokscale fallback to 4.23.0 (#18) (ffcd7fb)
+- Migrate Session Cost to public plugin SDK v0.1.0 (#16) (bd7d993)
+
+
 ## [0.4.1] - 2026-10-05
 
 ### Changed

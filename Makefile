@@ -1,7 +1,7 @@
 .PHONY: build test fmt check-format vet package package-host package-file verify-package verify-package-host sdk-check clean
 
 BIN := bin/kandev-session-cost
-VERSION := 0.4.1
+VERSION := 0.5.0
 STAGE := .build/stage
 PKG_OUT := kandev-session-cost-$(VERSION).tar.gz
 KANDEV_PACK_ROOT ?= ../kandev
