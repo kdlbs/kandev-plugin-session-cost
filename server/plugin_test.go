@@ -94,7 +94,7 @@ func webhookGet(key, query string) *pluginsdk.WebhookRequest {
 func modelsRunner(modelsOut []byte, modelsErr error) runner {
 	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		if len(args) > 0 && args[len(args)-1] == "--version" {
-			return []byte("tokscale 4.15.1\n"), nil
+			return []byte("tokscale 4.23.0\n"), nil
 		}
 		return modelsOut, modelsErr
 	}
@@ -176,6 +176,21 @@ func TestHandleWebhook_FoundSumsSessionRows(t *testing.T) {
 	// Default thresholds echoed for the UI to colour by.
 	require.Equal(t, defaultWarnThreshold, d.WarnThreshold)
 	require.Equal(t, defaultHighThreshold, d.HighThreshold)
+}
+
+// This row preserves the fields observed in tokscale 4.23.0 grouped output
+// for the synthetic Copilot events in issue #17.
+func TestHandleWebhook_CopilotGroupedOutput(t *testing.T) {
+	const copilotReport = `{"entries":[{"sessionId":"cost-probe","model":"gpt-6.1-sol","input":100,"output":100,"cacheRead":800,"messageCount":1,"cost":0.001}]}`
+	p := newTestPlugin(nil, []pluginsdk.Session{session("kandev-session", "cost-probe")}, modelsRunner([]byte(copilotReport), nil))
+	_, result := callReadyWebhook(t, p, "task_id=task-1&active=kandev-session")
+	require.True(t, result.Found)
+	require.Equal(t, "cost-probe", result.ACPSessionID)
+	require.Equal(t, int64(100), result.Input)
+	require.Equal(t, int64(100), result.Output)
+	require.Equal(t, int64(1), result.Turns)
+	require.InDelta(t, 0.001, result.Cost, 1e-9)
+	require.Equal(t, []sessionModel{{Model: "gpt-6.1-sol", Input: 100, Output: 100, CacheRead: 800, Cost: 0.001}}, result.Models)
 }
 
 func TestHandleWebhook_SlowReportReturnsPending(t *testing.T) {
