@@ -5,6 +5,11 @@ session's spend, cost per turn, and per-model usage in the chat composer. The
 backend reads the local agent transcript through the [tokscale](https://github.com/junhoyeo/tokscale)
 CLI.
 
+When Tokscale reports a matching Devin CLI row (`client: "devin-cli"`), Session
+Cost labels its USD model pricing as an estimate and prefixes the toolbar amount
+with `≈`. Devin's own [`/session-stats` command](https://docs.devin.ai/cli/reference/commands#session-statistics)
+reports session credits and ACUs.
+
 ## Screenshots
 
 Session cost details on hover or focus, with the total, cost per turn, token
@@ -58,7 +63,15 @@ The manifest uses plugin API v1 and requests read-only access to Kandev
 sessions (`api_read: ["sessions"]`). It does not request credentials or write
 access. The plugin runs tokscale on the machine hosting the Kandev plugin
 backend, so tokscale must be installed there or available through the configured
-command.
+command. Tokscale also needs read access to that host's local agent history.
+
+Tokscale can read SQLite histories, including the Devin `sessions.db` layout.
+Devin can also use the file-store layout at `sessions/<id>/meta.json` and
+`sessions/<id>/log.jsonl`. The pinned Tokscale 4.23.0 fallback reads the SQLite
+layout but does not yet read isolated file-store sessions; support is tracked
+in [Tokscale PR #1651](https://github.com/junhoyeo/tokscale/pull/1651). A newer
+Tokscale release must be checked against both layouts before updating the
+fallback pin.
 
 The package contains server binaries for Linux amd64 and arm64, macOS amd64 and
 arm64, and Windows amd64. The UI uses the host's React instance and does not

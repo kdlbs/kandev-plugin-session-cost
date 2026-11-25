@@ -41,6 +41,7 @@ var TRANSLATIONS = {
     noRecordedUsage: "No recorded usage for this session yet.",
     turnCount_one: "{{count}} turn",
     turnCount_other: "{{count}} turns",
+    tokscaleEstimate: "Tokscale model cost estimate",
     costPerTurn: "{{amount}} / turn",
     input: "Input",
     output: "Output",
@@ -72,6 +73,7 @@ var TRANSLATIONS = {
     noRecordedUsage: "Ainda não há utilização registada para esta sessão.",
     turnCount_one: "{{count}} turno",
     turnCount_other: "{{count}} turnos",
+    tokscaleEstimate: "Estimativa do Tokscale para o custo do modelo",
     costPerTurn: "{{amount}} / turno",
     input: "Entrada",
     output: "Saída",
@@ -241,6 +243,15 @@ function costCard(h, d, t, status) {
           style: { fontSize: "11px", opacity: 0.75, lineHeight: 1.35, overflowWrap: "anywhere" },
         },
         status,
+      ),
+    );
+  }
+  if (d.cost_is_estimate) {
+    rows.push(
+      h(
+        "div",
+        { style: { fontSize: "11px", opacity: 0.75, lineHeight: 1.35 } },
+        translate(t, "tokscaleEstimate"),
       ),
     );
   }
@@ -444,7 +455,7 @@ function inlineCost(h, d) {
         color: tierColor(d.cost, d.warn_threshold, d.high_threshold),
       },
     },
-    fmtUSD(d.cost),
+    (d.cost_is_estimate ? "≈" : "") + fmtUSD(d.cost),
   );
 }
 
@@ -458,6 +469,7 @@ function validateCostResponse(data) {
   if (!["ready", "pending", "failed"].includes(state)) throw new Error("invalid_response");
   if (typeof data.found !== "boolean" || typeof data.acp_session_id !== "string") throw new Error("invalid_response");
   if (data.stale !== undefined && typeof data.stale !== "boolean") throw new Error("invalid_response");
+  if (data.cost_is_estimate !== undefined && typeof data.cost_is_estimate !== "boolean") throw new Error("invalid_response");
   if (data.report_error !== undefined && typeof data.report_error !== "string") throw new Error("invalid_response");
   if (data.tokscale !== undefined) {
     if (!data.tokscale || typeof data.tokscale !== "object" || Array.isArray(data.tokscale)) throw new Error("invalid_response");
@@ -820,7 +832,7 @@ function makeSessionCostAction(host) {
             id: "session-cost-action",
             label: actionLabel,
             icon: coinsIcon(h, 16, iconColor),
-            text: loaded && loaded.found ? fmtUSD(loaded.cost) : undefined,
+            text: loaded && loaded.found ? (loaded.cost_is_estimate ? "≈" : "") + fmtUSD(loaded.cost) : undefined,
             tone: actionTone,
             pressed: visiblePinned,
             tooltip: "",

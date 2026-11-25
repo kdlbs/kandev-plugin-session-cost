@@ -28,13 +28,14 @@ const (
 )
 
 type usageTotals struct {
-	Found     bool
-	Cost      float64
-	Input     int64
-	Output    int64
-	CacheRead int64
-	Turns     int64
-	Models    []sessionModel
+	Found          bool
+	CostIsEstimate bool
+	Cost           float64
+	Input          int64
+	Output         int64
+	CacheRead      int64
+	Turns          int64
+	Models         []sessionModel
 }
 
 type reportSnapshot struct {
@@ -214,6 +215,7 @@ func buildReportSnapshot(entries []sessionModelEntry, cmd resolvedCommand, gener
 			snapshot.sessionOrder = append(snapshot.sessionOrder, entry.SessionID)
 		}
 		totals.Found = true
+		totals.CostIsEstimate = totals.CostIsEstimate || entry.Client == "devin-cli"
 		totals.Cost += entry.Cost
 		totals.Input += entry.Input
 		totals.Output += entry.Output
@@ -239,6 +241,7 @@ func (s *reportSnapshot) usageFor(acpSessionID string) usageTotals {
 			continue
 		}
 		usage.Found = true
+		usage.CostIsEstimate = usage.CostIsEstimate || totals.CostIsEstimate
 		usage.Cost += totals.Cost
 		usage.Input += totals.Input
 		usage.Output += totals.Output

@@ -72,11 +72,14 @@ type sessionCostResponse struct {
 	// empty if the agent hasn't reported one yet.
 	ACPSessionID string `json:"acp_session_id"`
 	// Found is true when tokscale had usage recorded for that transcript.
-	Found     bool    `json:"found"`
-	Cost      float64 `json:"cost"`
-	Input     int64   `json:"input"`
-	Output    int64   `json:"output"`
-	CacheRead int64   `json:"cache_read"`
+	Found bool `json:"found"`
+	// CostIsEstimate marks model-price estimates for clients whose billing
+	// metrics are not represented by Tokscale's USD model costs.
+	CostIsEstimate bool    `json:"cost_is_estimate,omitempty"`
+	Cost           float64 `json:"cost"`
+	Input          int64   `json:"input"`
+	Output         int64   `json:"output"`
+	CacheRead      int64   `json:"cache_read"`
 	// Turns is the number of messages tokscale parsed for this session's
 	// transcript — the session's turn count, computed server-side.
 	Turns int64 `json:"turns"`
@@ -177,6 +180,7 @@ func (p *plugin) sessionCost(ctx context.Context, taskID, activeSessionID string
 		resp.Tokscale = view.snapshot.tokscale
 		usage := view.snapshot.usageFor(resp.ACPSessionID)
 		resp.Found = usage.Found
+		resp.CostIsEstimate = usage.CostIsEstimate
 		resp.Cost = usage.Cost
 		resp.Input = usage.Input
 		resp.Output = usage.Output
@@ -240,6 +244,7 @@ func jsonResponse(status int32, body []byte) *pluginsdk.WebhookResponse {
 // sessionModelEntry mirrors one element of `tokscale models --json --group-by
 // session,model` output (tokscale 4.15.x). Only the fields used are declared.
 type sessionModelEntry struct {
+	Client       string  `json:"client,omitempty"`
 	SessionID    string  `json:"sessionId"`
 	Model        string  `json:"model"`
 	Input        int64   `json:"input"`
