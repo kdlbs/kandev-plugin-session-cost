@@ -1,0 +1,62 @@
+{
+  "groupBy": "session,model",
+  "entries": [
+    {
+      "client": "devin-cli",
+      "mergedClients": null,
+      "sessionId": "99c4d7b0-934a-4d47-83e4-1bb8a6d42dc1",
+      "model": "claude-opus-4-6",
+      "provider": "anthropic",
+      "input": 1200,
+      "output": 340,
+      "cacheRead": 500,
+      "cacheWrite": 0,
+      "reasoning": 0,
+      "messageCount": 1,
+      "cost": 0.014750000000000001,
+      "performance": {
+        "msPer1KTokens": null,
+        "totalDurationMs": 0,
+        "timedTokens": 0,
+        "sampleCount": 0,
+        "tokenCoverage": 0.0
+      }
+    },
+    {
+      "client": "devin-cli",
+      "mergedClients": null,
+      "sessionId": "99c4d7b0-934a-4d47-83e4-1bb8a6d42dc1",
+      "model": "gpt-5",
+      "provider": "openai",
+      "input": 600,
+      "output": 180,
+      "cacheRead": 120,
+      "cacheWrite": 0,
+      "reasoning": 0,
+      "messageCount": 1,
+      "cost": 0.002565,
+      "performance": {
+        "msPer1KTokens": null,
+        "totalDurationMs": 0,
+        "timedTokens": 0,
+        "sampleCount": 0,
+        "tokenCoverage": 0.0
+      }
+    }
+  ],
+  "totalInput": 1800,
+  "totalOutput": 520,
+  "totalCacheRead": 620,
+  "totalCacheWrite": 0,
+  "totalMessages": 2,
+  "totalCost": 0.017315,
+  "processingTimeMs": 67,
+  "undatedTokens": {
+    "input": 0,
+    "output": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "cacheWrite1h": 0,
+    "reasoning": 0
+  }
+}

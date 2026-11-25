@@ -408,6 +408,7 @@ test("new hosts render one localized Action without plugin shell styles", async 
   assert.equal(view.trigger().props.tone, "warning");
   assert.match(view.text(), /1 turno/);
   assert.match(view.text(), /\$1\.25 \/ turno/);
+  assert.doesNotMatch(view.text(), /Tokscale model cost estimate|Estimativa do Tokscale para o custo do modelo/);
   assert.match(view.text(), /Entrada10/);
   assert.equal(view.refresh().props["aria-label"], "Atualizar o custo da sessão");
 });
@@ -432,6 +433,54 @@ test("older-host mobile fallback keeps a touch target and lets loaded cost conte
   assert.match(loadedTrigger.props.className, /px-1\.5/);
   assert.doesNotMatch(loadedTrigger.props.className, /\[@media\(pointer:coarse\)\]:w-11/);
   assert.match(view.text(), /123,456,789\.12/);
+  assert.match(renderedText(loadedTrigger), /\$123,456,789\.12/);
+  assert.doesNotMatch(renderedText(loadedTrigger), /≈/);
+});
+
+test("Devin estimates are labeled in details and approximate both toolbar triggers", async () => {
+  const estimated = costResponse({
+    cost: 0.017315,
+    cost_per_turn: 0.0086575,
+    turns: 2,
+    input: 1800,
+    output: 520,
+    cache_read: 620,
+    cost_is_estimate: true,
+    models: [
+      { model: "claude-opus-4-6", cost: 0.014750000000000001, input: 1200, output: 340, cache_read: 500 },
+      { model: "gpt-5", cost: 0.002565, input: 600, output: 180, cache_read: 120 },
+    ],
+  });
+
+  const action = createActionHarness({ action: true });
+  action.trigger().props.onClick();
+  action.requests[0].resolve(estimated);
+  await flushPromises();
+
+  assert.equal(action.trigger().props.text, "≈$0.02");
+  assert.equal(action.trigger().props.label, "Session cost");
+  assert.match(action.text(), /Tokscale model cost estimate/);
+  assert.match(action.text(), /\$0\.02/);
+  assert.match(action.text(), /\$0\.0087 \/ turn/);
+  assert.match(action.text(), /1\.8K/);
+  assert.match(action.text(), /520/);
+  assert.match(action.text(), /620/);
+  assert.match(action.text(), /claude-opus-4-6/);
+  assert.match(action.text(), /gpt-5/);
+
+  const fallback = createActionHarness();
+  fallback.trigger().props.onClick();
+  fallback.requests[0].resolve(estimated);
+  await flushPromises();
+  assert.equal(fallback.trigger().type, "Button");
+  assert.match(renderedText(fallback.trigger()), /≈\$0\.02/);
+  assert.match(fallback.text(), /Tokscale model cost estimate/);
+
+  const portuguese = createActionHarness({ action: true, locale: "pt-pt" });
+  portuguese.trigger().props.onClick();
+  portuguese.requests[0].resolve(estimated);
+  await flushPromises();
+  assert.match(portuguese.text(), /Estimativa do Tokscale para o custo do modelo/);
 });
 
 test("new Action forwards the existing disclosure handlers and closes outside or on Escape", () => {

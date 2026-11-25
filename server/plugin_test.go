@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -169,6 +170,7 @@ func TestHandleWebhook_FoundSumsSessionRows(t *testing.T) {
 	require.Equal(t, int64(1050), d.Input)
 	require.Equal(t, int64(520), d.Output)
 	require.Equal(t, int64(5), d.Turns, "sums messageCount across the session's model rows")
+	require.False(t, d.CostIsEstimate, "reports without a client field keep ordinary cost semantics")
 	require.InDelta(t, 1.30/5.0, d.CostPerTurn, 1e-9, "avg cost per turn computed server-side")
 	require.Len(t, d.Models, 2)
 	require.Equal(t, sessionModel{Model: "claude-opus-4-8", Input: 1000, Output: 500, CacheRead: 200, Cost: 1.25}, d.Models[0])
@@ -176,6 +178,56 @@ func TestHandleWebhook_FoundSumsSessionRows(t *testing.T) {
 	// Default thresholds echoed for the UI to colour by.
 	require.Equal(t, defaultWarnThreshold, d.WarnThreshold)
 	require.Equal(t, defaultHighThreshold, d.HighThreshold)
+}
+
+func TestHandleWebhook_DevinGroupedOutputMarksMatchedTotalsAsEstimate(t *testing.T) {
+	// This fixture is the unmodified grouped report captured from Tokscale
+	// 4.23.0 reading a synthetic Devin SQLite history. Add an unrelated row to
+	// verify that only the active ACP transcript contributes to the response.
+	report, err := os.ReadFile("testdata/tokscale-devin-4.23.0-sqlite.json")
+	require.NoError(t, err)
+	var document map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(report, &document))
+	var entries []json.RawMessage
+	require.NoError(t, json.Unmarshal(document["entries"], &entries))
+	entries = append(entries, json.RawMessage(`{"client":"devin-cli","sessionId":"unrelated-session","model":"gpt-5","input":9000,"output":8000,"cacheRead":7000,"messageCount":3,"cost":9.99}`))
+	document["entries"], err = json.Marshal(entries)
+	require.NoError(t, err)
+	devinReport, err := json.Marshal(document)
+	require.NoError(t, err)
+
+	const kandevSessionID = "kandev-devin-session"
+	const acpSessionID = "99c4d7b0-934a-4d47-83e4-1bb8a6d42dc1"
+	var runs atomic.Int32
+	p := newTestPlugin(nil, []pluginsdk.Session{session(kandevSessionID, acpSessionID)}, runner(func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		runs.Add(1)
+		return devinReport, nil
+	}))
+
+	_, ready := callReadyWebhook(t, p, "task_id=task-1&active="+kandevSessionID)
+	require.Equal(t, reportStateReady, ready.ReportState)
+	require.Equal(t, kandevSessionID, ready.KandevSessionID)
+	require.Equal(t, acpSessionID, ready.ACPSessionID)
+	require.True(t, ready.Found)
+	require.True(t, ready.CostIsEstimate)
+	require.Len(t, ready.Models, 2)
+	require.Equal(t, []sessionModel{
+		{Model: "claude-opus-4-6", Input: 1200, Output: 340, CacheRead: 500, Cost: 0.014750000000000001},
+		{Model: "gpt-5", Input: 600, Output: 180, CacheRead: 120, Cost: 0.002565},
+	}, ready.Models)
+	require.Equal(t, int64(1800), ready.Input)
+	require.Equal(t, int64(520), ready.Output)
+	require.Equal(t, int64(620), ready.CacheRead)
+	require.Equal(t, int64(2), ready.Turns)
+	require.InDelta(t, 0.017315, ready.Cost, 1e-12)
+	require.InDelta(t, 0.017315/2.0, ready.CostPerTurn, 1e-12)
+
+	// A subsequent request uses the cached report and preserves the estimate.
+	_, cached := callReadyWebhook(t, p, "task_id=task-1&active="+kandevSessionID)
+	require.True(t, cached.CostIsEstimate)
+	require.Equal(t, ready.Models, cached.Models)
+	require.InDelta(t, ready.Cost, cached.Cost, 1e-12)
+	require.Equal(t, int32(1), runs.Load())
 }
 
 // This row preserves the fields observed in tokscale 4.23.0 grouped output
