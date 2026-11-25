@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0] - 2026-11-25
+
+### Changed
+
+- Support Devin CLI session cost estimates (#19) (6ae6ef6)
+
+
 ## [0.5.0] - 2026-11-17
 
 ### Changed

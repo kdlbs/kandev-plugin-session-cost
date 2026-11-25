@@ -107,7 +107,7 @@ Plugins → Install plugin**. You can also install the local package through the
 plugin API:
 
 ```sh
-curl -F package=@kandev-session-cost-0.5.0.tar.gz http://localhost:8080/api/plugins/install
+curl -F package=@kandev-session-cost-0.6.0.tar.gz http://localhost:8080/api/plugins/install
 ```
 
 ## Develop and verify
@@ -187,7 +187,7 @@ The browser calls the installed webhook and checks its recovery states.
 ```sh
 (cd "$HOST_ROOT/apps/web" && \
   NODE_OPTIONS='--import=tsx' \
-  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.5.0.tar.gz" \
+  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.6.0.tar.gz" \
   SESSION_COST_EXPECT_ACTION=1 \
   pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs")
 ```
@@ -236,7 +236,7 @@ env -i LANG=C.UTF-8 HOME="$TASK_TMP/home" XDG_CONFIG_HOME="$TASK_TMP/config" \
   NODE_OPTIONS='--import=tsx' KANDEV_HOST_ROOT="$HOST_ROOT" \
   KANDEV_E2E_BIN="$E2E_RUNTIME/bin/kandev" \
   SESSION_COST_SMOKE_ARTIFACT_DIR="$TASK_TMP/artifacts" \
-  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.5.0.tar.gz" \
+  SESSION_COST_PACKAGE_PATH="$PLUGIN_ROOT/kandev-session-cost-0.6.0.tar.gz" \
   SESSION_COST_EXPECT_ACTION=1 SESSION_COST_EXPECT_HOST_VERSION=0.99.0 \
   KANDEV_SERVER_HOST=127.0.0.1 E2E_PORT_OFFSET=22 \
   pnpm exec playwright test --config "$PLUGIN_ROOT/test/host-action-smoke.playwright.config.mjs" \
